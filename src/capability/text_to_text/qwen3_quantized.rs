@@ -1,0 +1,754 @@
+//! Provides streaming completion capabilities using local Qwen3 models
+//! with quantized GGUF models for efficient inference.
+//!
+//! This implementation uses Candle's native quantized_qwen3 with performance ranging
+//! from 80-120 tokens/s depending on hardware (M3 Mac: 95+, M1/M2: 80-100, CPU: 30-50).
+
+use std::num::NonZeroU32;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use crate::async_stream;
+use crate::core::generation::TokenOutputStream;
+use candle_core::quantized::gguf_file;
+use candle_core::{Device, IndexOp, Tensor};
+use candle_transformers::generation::{LogitsProcessor, Sampling};
+use candle_transformers::models::quantized_qwen3::ModelWeights as Qwen3Model;
+use tokio_stream::Stream;
+
+use crate::core::{Engine, EngineConfig};
+
+use crate::domain::completion::ToolCallParser;
+use crate::domain::completion::format_tools_for_qwen3;
+use crate::domain::completion::{CandleCompletionChunk, CandleCompletionParams};
+use crate::domain::model::{info::CandleModelInfo, traits::CandleModel};
+use crate::domain::prompt::CandlePrompt;
+use kodegen_simd::logits::constraints::GenerationConstraint;
+use uuid::Uuid;
+
+/// Builder trait for Qwen3 Quantized completion providers
+pub trait BuilderCandleQwen3QuantizedModel: Send + Sync + 'static {
+    // Default implementations for all builders
+}
+
+/// High-performance Qwen3 1.7B Quantized provider for local inference using Candle
+///
+/// Provides streaming text generation capabilities using the Qwen3-1.7B quantized model
+/// with automatic model downloading via HuggingFace.
+#[derive(Debug, Clone)]
+pub struct CandleQwen3QuantizedModel {
+    /// Engine for orchestration and stream conversion
+    engine: Arc<Engine>,
+}
+
+impl CandleQwen3QuantizedModel {
+    /// Create new Qwen3 Quantized provider (lightweight, no downloads)
+    ///
+    /// Model files are downloaded lazily on first use.
+    ///
+    /// # Example
+    /// ```rust
+    /// let provider = CandleQwen3QuantizedModel::new()?;
+    /// ```
+    ///
+    /// # Errors
+    /// Returns error if engine creation fails
+    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Create engine configuration using ModelInfo values
+        let engine_config = EngineConfig::new("qwen3-quantized", "candle-qwen")
+            .with_streaming()
+            .with_max_tokens(32768) // From QWEN3_QUANTIZED_MODEL_INFO
+            .with_temperature(0.0); // Greedy sampling for deterministic output
+
+        let engine = Arc::new(Engine::new(engine_config)?);
+
+        Ok(Self { engine })
+    }
+}
+
+// Static model info for Qwen3 1.7B Quantized
+pub static QWEN3_QUANTIZED_MODEL_INFO: CandleModelInfo = CandleModelInfo {
+    provider: crate::domain::model::CandleProvider::Unsloth,
+    name: "qwen3-1.7b-quantized",
+    registry_key: "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF",
+    quantization_url: None,
+    max_input_tokens: NonZeroU32::new(32768), // 32K context window
+    max_output_tokens: NonZeroU32::new(8192),
+    input_price: None,
+    output_price: None,
+    supports_vision: false,
+    supports_function_calling: true,
+    supports_streaming: true,
+    supports_embeddings: false,
+    requires_max_tokens: false,
+    supports_thinking: false,
+    optimal_thinking_budget: None,
+    system_prompt_prefix: None,
+    real_name: None,
+    model_type: None,
+    model_id: "qwen-3",
+    quantization: "Q4_K_M",
+    patch: None,
+    embedding_dimension: None,
+    vocab_size: Some(151936), // Qwen3 vocabulary
+    image_size: None,
+    image_mean: None,
+    image_std: None,
+    default_temperature: Some(0.0), // Greedy sampling for deterministic output
+    default_top_k: Some(50),
+    default_top_p: Some(0.9),
+    supports_kv_cache: true,
+    supports_flash_attention: false,
+    use_bf16: false,
+    default_steps: None,
+    default_guidance_scale: None,
+    time_shift: None,
+    est_memory_allocation_mb: 1500, // ~1.5GB for Q4_K_M quantized
+};
+
+impl CandleModel for CandleQwen3QuantizedModel {
+    #[inline]
+    fn info(&self) -> &'static CandleModelInfo {
+        &QWEN3_QUANTIZED_MODEL_INFO
+    }
+}
+
+/// Loaded Qwen3 Quantized model that keeps resources in memory for worker threads
+///
+/// This model pre-loads the actual model into memory with safe async mutable access,
+/// avoiding disk I/O on every request.
+#[derive(Clone)]
+pub struct LoadedQwen3QuantizedModel {
+    /// The loaded Qwen3 model using Candle's native quantized implementation
+    /// Wrapped in Arc<Mutex> for safe sharing in async context
+    model: Arc<tokio::sync::Mutex<Qwen3Model>>,
+    tokenizer: tokenizers::Tokenizer,
+    device: Device,
+    engine: Arc<Engine>,
+    /// EOS token ID extracted from GGUF metadata
+    eos_token_id: Option<u32>,
+}
+
+impl LoadedQwen3QuantizedModel {
+    /// Load model resources into memory (called once per worker)
+    ///
+    /// This method loads EVERYTHING once: model, tokenizer, device.
+    /// The model stays in memory for all subsequent requests.
+    pub async fn load(
+        base: &CandleQwen3QuantizedModel,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        log::info!("Loading Qwen3 model using Candle's native quantized implementation");
+
+        // Download files using huggingface_file()
+        let gguf_file_path = base
+            .huggingface_file("unsloth/Qwen3-1.7B-GGUF", "Qwen3-1.7B-Q4_K_M.gguf")
+            .await?;
+        let tokenizer_path = base
+            .huggingface_file("Qwen/Qwen3-1.7B", "tokenizer.json")
+            .await?;
+
+        if !tokenizer_path.exists() {
+            return Err(
+                Box::from(format!("Tokenizer file not found: {:?}", tokenizer_path))
+                    as Box<dyn std::error::Error + Send + Sync>,
+            );
+        }
+
+        // Load device (prefer GPU if available)
+        let device = crate::core::device_util::detect_best_device().unwrap_or_else(|e| {
+            log::warn!("Device detection failed: {}. Using CPU.", e);
+            Device::Cpu
+        });
+
+        // Load GGUF file - simple and direct (no spawn_blocking)
+        log::info!("Loading model from {}", gguf_file_path.display());
+        let mut file = std::fs::File::open(&gguf_file_path).map_err(|e| {
+            Box::from(format!("Failed to open GGUF file: {}", e))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
+
+        let content = gguf_file::Content::read(&mut file).map_err(|e| {
+            Box::from(format!("Failed to read GGUF content: {}", e))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
+
+        // Extract EOS token from GGUF metadata
+        let eos_token_id = content
+            .metadata
+            .get("tokenizer.ggml.eos_token_id")
+            .and_then(|v| v.to_u32().ok());
+
+        log::info!("EOS token ID from GGUF: {:?}", eos_token_id);
+
+        // Create model using Candle's native implementation - simple and fast!
+        let model = Qwen3Model::from_gguf(content, &mut file, &device).map_err(|e| {
+            Box::from(format!("Failed to create model: {}", e))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
+
+        log::info!("Model loaded successfully");
+
+        // Load tokenizer - direct synchronous loading (no spawn_blocking)
+        log::info!("Loading tokenizer from {}", tokenizer_path.display());
+        let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path).map_err(|e| {
+            Box::from(format!("Failed to load tokenizer: {}", e))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
+
+        log::info!("Tokenizer loaded successfully");
+
+        Ok(Self {
+            model: Arc::new(tokio::sync::Mutex::new(model)),
+            tokenizer,
+            device,
+            engine: Arc::clone(&base.engine),
+            eos_token_id,
+        })
+    }
+
+    /// Get reference to tokenizer for constraint creation
+    ///
+    /// This is required by the tool selection agent to create schema constraints
+    /// using `constraint_for_type()` which needs access to the tokenizer's vocabulary.
+    pub fn tokenizer(&self) -> &tokenizers::Tokenizer {
+        &self.tokenizer
+    }
+
+    /// Generate text with schema constraint to guarantee valid JSON output
+    ///
+    /// This method implements structured generation by masking invalid tokens
+    /// based on a schema constraint, ensuring the output conforms to a specific
+    /// JSON structure (e.g., ToolSelectionResponse).
+    ///
+    /// # Arguments
+    /// * `prompt` - The prompt to generate from
+    /// * `type_constraint` - Schema constraint created via `constraint_for_type()`
+    ///
+    /// # Returns
+    /// * `Ok(String)` - Generated text guaranteed to match schema
+    /// * `Err(anyhow::Error)` - If generation fails
+    pub async fn prompt_with_context(
+        &self,
+        prompt: String,
+        type_constraint: kodegen_simd::logits::constraints::SchemaConstraint,
+    ) -> anyhow::Result<String> {
+        use anyhow::Context;
+
+        // Initialize constraint state
+        let mut constraint_state = type_constraint.new_state();
+
+        // Tokenize prompt
+        let tokens = self
+            .tokenizer
+            .encode(prompt, true)
+            .map_err(|e| anyhow::anyhow!("Failed to tokenize prompt: {}", e))?;
+        let mut all_tokens = tokens.get_ids().to_vec();
+
+        // Generation loop with constraint masking
+        let mut generated_text = String::new();
+        let max_tokens = 500;
+
+        for _ in 0..max_tokens {
+            // Get logits from model
+            let input_ids = Tensor::new(&all_tokens[..], &self.device)?;
+            let logits = {
+                let mut model = self.model.lock().await;
+                model.forward(&input_ids.unsqueeze(0)?, 0)?
+            };
+
+            // Extract next token logits
+            let logits = logits.i((0, logits.dim(1)? - 1))?;
+            let mut logits_vec = logits.to_vec1::<f32>()?;
+
+            // Apply temperature for more deterministic selection
+            let temperature = 0.3;
+            if temperature != 1.0 {
+                for logit in &mut logits_vec {
+                    *logit /= temperature;
+                }
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // CONSTRAINT MASKING - Insert AFTER penalties, BEFORE sampling
+            // ═══════════════════════════════════════════════════════════
+            for (token_id, logit) in logits_vec.iter_mut().enumerate() {
+                let is_valid = type_constraint
+                    .try_next(&constraint_state, token_id as u32)
+                    .unwrap_or(false);
+
+                if !is_valid {
+                    *logit = f32::NEG_INFINITY; // Mask invalid tokens
+                }
+            }
+
+            // Sample next token (now guaranteed to be schema-valid)
+            let next_token = self.sample_token(&logits_vec)?;
+
+            // Update constraint state with accepted token
+            let continue_generation = type_constraint
+                .update(&mut constraint_state, next_token)
+                .context("Constraint update failed")?;
+
+            // Check if schema is complete
+            if !continue_generation || type_constraint.is_done(&constraint_state) {
+                break;
+            }
+
+            // Decode and append token
+            all_tokens.push(next_token);
+            let token_text = self
+                .tokenizer
+                .decode(&[next_token], false)
+                .map_err(|e| anyhow::anyhow!("Failed to decode token: {}", e))?;
+            generated_text.push_str(&token_text);
+
+            // Stop on EOS
+            if Some(next_token) == self.eos_token_id {
+                break;
+            }
+        }
+
+        Ok(generated_text)
+    }
+
+    /// Sample a token from logits distribution
+    ///
+    /// Converts logits to probabilities via softmax and samples from the
+    /// resulting distribution using basic random sampling.
+    ///
+    /// # Arguments
+    /// * `logits` - Logit values for each token in vocabulary
+    ///
+    /// # Returns
+    /// * `Ok(u32)` - Sampled token ID
+    /// * `Err(anyhow::Error)` - If sampling fails
+    fn sample_token(&self, logits: &[f32]) -> anyhow::Result<u32> {
+        use rand::Rng;
+
+        // Convert logits to probabilities via softmax
+        let max_logit = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+
+        // Check for all invalid tokens (all NEG_INFINITY)
+        if max_logit.is_infinite() && max_logit.is_sign_negative() {
+            anyhow::bail!("All tokens masked - cannot sample");
+        }
+
+        let exp_sum: f32 = logits.iter().map(|&l| (l - max_logit).exp()).sum();
+
+        let probs: Vec<f32> = logits
+            .iter()
+            .map(|&l| (l - max_logit).exp() / exp_sum)
+            .collect();
+
+        // Sample from distribution
+        let mut rng = rand::rng();
+        let sample: f32 = rng.random();
+        let mut cumsum = 0.0;
+
+        for (i, &prob) in probs.iter().enumerate() {
+            cumsum += prob;
+            if cumsum >= sample {
+                return Ok(i as u32);
+            }
+        }
+
+        Ok((probs.len() - 1) as u32) // Fallback to last token
+    }
+}
+
+impl crate::capability::traits::TextToTextCapable for LoadedQwen3QuantizedModel {
+    fn prompt(
+        &self,
+        prompt: CandlePrompt,
+        params: &CandleCompletionParams,
+    ) -> Pin<Box<dyn Stream<Item = CandleCompletionChunk> + Send>> {
+        // Clone pre-loaded resources for the generation closure
+        let engine = self.engine.clone();
+        let model = self.model.clone(); // ✅ Use CACHED model
+        let device = self.device.clone();
+        let tokenizer = self.tokenizer.clone(); // ✅ Clone pre-loaded tokenizer
+        let eos_token_id = self.eos_token_id.unwrap_or(151645);
+
+        log::info!("🚀 Using CACHED model from memory - no loading needed!");
+
+        // Build sampling config - use temperature from params directly
+        let temperature = params.temperature;
+
+        // Extract additional params or use defaults
+        let top_k = params
+            .additional_params
+            .as_ref()
+            .and_then(|p| p.get("top_k"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize);
+
+        let top_p = params
+            .additional_params
+            .as_ref()
+            .and_then(|p| p.get("top_p"))
+            .and_then(|v| v.as_f64())
+            .or(QWEN3_QUANTIZED_MODEL_INFO.default_top_p);
+
+        let repeat_penalty = params
+            .additional_params
+            .as_ref()
+            .and_then(|p| p.get("repeat_penalty"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
+
+        let repeat_last_n = params
+            .additional_params
+            .as_ref()
+            .and_then(|p| p.get("repeat_last_n"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(64);
+
+        // Format prompt using Qwen3 chat template with optional tool support
+        let prompt_text = if let Some(ref tools) = params.tools {
+            // Convert ZeroOneOrMany to Vec using Into trait
+            let tools_vec: Vec<_> = tools.clone().into();
+
+            if tools_vec.is_empty() {
+                // No tools available - standard user prompt
+                format!(
+                    "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+                    prompt.content
+                )
+            } else {
+                // Tools available - add system message with tool definitions
+                let tool_defs = format_tools_for_qwen3(&tools_vec);
+
+                log::debug!("Generated prompt with {} tool(s)", tools_vec.len());
+
+                format!(
+                    "<|im_start|>system\nYou are a helpful AI assistant with access to tools. When you need to use a tool, output <tool_call>{{\"name\": \"tool_name\", \"arguments\": {{...}}}}</tool_call>\n\n{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+                    tool_defs, prompt.content
+                )
+            }
+        } else {
+            // No tools parameter provided - standard user prompt
+            format!(
+                "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+                prompt.content
+            )
+        };
+        let max_tokens = params.max_tokens.map(|n| n.get()).unwrap_or(1000);
+
+        // Use Engine's coordinate_completion for automatic metrics and stream conversion
+        Box::pin(engine.coordinate_completion(move || {
+            async_stream::spawn_stream(move |tx| async move {
+                log::info!("✅ Using cached model from memory - no disk I/O!");
+
+                // Encode the prompt
+                let tokens = match tokenizer.encode(prompt_text.as_str(), true) {
+                    Ok(encoding) => encoding.get_ids().to_vec(),
+                    Err(e) => {
+                        let _ = tx.send(CandleCompletionChunk::Error(format!(
+                            "Failed to encode prompt: {}",
+                            e
+                        )));
+                        return;
+                    }
+                };
+
+                // Create LogitsProcessor for sampling
+                let seed = 299792458;
+                let mut logits_processor = {
+                    let sampling = if temperature <= 0.0 {
+                        Sampling::ArgMax
+                    } else {
+                        match (top_k, top_p) {
+                            (None, None) => Sampling::All { temperature },
+                            (Some(k), None) => Sampling::TopK { k, temperature },
+                            (None, Some(p)) => Sampling::TopP { p, temperature },
+                            (Some(k), Some(p)) => Sampling::TopKThenTopP { k, p, temperature },
+                        }
+                    };
+                    LogitsProcessor::from_sampling(seed, sampling)
+                };
+
+                // Create TokenOutputStream for efficient decoding
+                let mut tos = TokenOutputStream::new(tokenizer.clone());
+
+                // Create tool call parser for detecting function calls in output
+                let mut tool_parser = ToolCallParser::new();
+
+                // Track all tokens for repeat penalty
+                let mut all_tokens = Vec::with_capacity(tokens.len() + max_tokens as usize);
+                all_tokens.extend_from_slice(&tokens);
+
+                // Lock the model for generation
+                let mut model = model.lock().await;
+
+                // Initial forward pass
+                let input = match Tensor::new(&tokens[..], &device) {
+                    Ok(t) => match t.unsqueeze(0) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            let _ = tx.send(CandleCompletionChunk::Error(format!(
+                                "Failed to unsqueeze tensor: {}",
+                                e
+                            )));
+                            return;
+                        }
+                    },
+                    Err(e) => {
+                        let _ = tx.send(CandleCompletionChunk::Error(format!(
+                            "Failed to create input tensor: {}",
+                            e
+                        )));
+                        return;
+                    }
+                };
+
+                let logits = match model.forward(&input, 0) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        let _ = tx.send(CandleCompletionChunk::Error(format!(
+                            "Forward pass failed: {}",
+                            e
+                        )));
+                        return;
+                    }
+                };
+
+                let logits = match logits.squeeze(0) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        let _ = tx.send(CandleCompletionChunk::Error(format!(
+                            "Failed to squeeze logits: {}",
+                            e
+                        )));
+                        return;
+                    }
+                };
+
+                // Apply temperature scaling
+                let logits = if temperature != 1.0 {
+                    match logits / temperature {
+                        Ok(l) => l,
+                        Err(e) => {
+                            let _ = tx.send(CandleCompletionChunk::Error(format!(
+                                "Temperature scaling failed: {}",
+                                e
+                            )));
+                            return;
+                        }
+                    }
+                } else {
+                    logits
+                };
+
+                // Conditional repeat penalty - skip when == 1.0 for performance
+                let logits = if repeat_penalty != 1.0 {
+                    let start_at = all_tokens.len().saturating_sub(repeat_last_n);
+                    match candle_transformers::utils::apply_repeat_penalty(
+                        &logits,
+                        repeat_penalty as f32,
+                        &all_tokens[start_at..],
+                    ) {
+                        Ok(l) => l,
+                        Err(e) => {
+                            let _ = tx.send(CandleCompletionChunk::Error(format!(
+                                "Repeat penalty failed: {}",
+                                e
+                            )));
+                            return;
+                        }
+                    }
+                } else {
+                    logits // Skip expensive operation when not needed
+                };
+
+                let mut next_token = match logits_processor.sample(&logits) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        let _ = tx.send(CandleCompletionChunk::Error(format!(
+                            "Sampling failed: {}",
+                            e
+                        )));
+                        return;
+                    }
+                };
+
+                all_tokens.push(next_token);
+
+                // Send first token (check for tool calls)
+                if let Some(text) = tos.next_token(next_token).ok().flatten() {
+                    if let Some(tool_call) = tool_parser.process_token(&text) {
+                        log::info!("🔧 Tool call detected: {}", tool_call.name);
+
+                        // Emit ToolCallComplete chunk
+                        let _ = tx.send(CandleCompletionChunk::ToolCallComplete {
+                            id: Uuid::new_v4().to_string(),
+                            name: tool_call.name,
+                            input: tool_call.arguments,
+                        });
+                    } else {
+                        // Regular text chunk
+                        let _ = tx.send(CandleCompletionChunk::Text(text));
+                    }
+                }
+
+                // Continue generation
+                for index in 0..max_tokens {
+                    if next_token == eos_token_id {
+                        break;
+                    }
+
+                    let input = match Tensor::new(&[next_token], &device) {
+                        Ok(t) => match t.unsqueeze(0) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                let _ = tx.send(CandleCompletionChunk::Error(format!(
+                                    "Failed to unsqueeze tensor: {}",
+                                    e
+                                )));
+                                return;
+                            }
+                        },
+                        Err(e) => {
+                            let _ = tx.send(CandleCompletionChunk::Error(format!(
+                                "Failed to create input tensor: {}",
+                                e
+                            )));
+                            return;
+                        }
+                    };
+
+                    let logits = match model.forward(&input, tokens.len() + index as usize) {
+                        Ok(l) => l,
+                        Err(e) => {
+                            let _ = tx.send(CandleCompletionChunk::Error(format!(
+                                "Forward pass failed: {}",
+                                e
+                            )));
+                            return;
+                        }
+                    };
+
+                    let logits = match logits.squeeze(0) {
+                        Ok(l) => l,
+                        Err(e) => {
+                            let _ = tx.send(CandleCompletionChunk::Error(format!(
+                                "Failed to squeeze logits: {}",
+                                e
+                            )));
+                            return;
+                        }
+                    };
+
+                    // Apply temperature scaling
+                    let logits = if temperature != 1.0 {
+                        match logits / temperature {
+                            Ok(l) => l,
+                            Err(e) => {
+                                let _ = tx.send(CandleCompletionChunk::Error(format!(
+                                    "Temperature scaling failed: {}",
+                                    e
+                                )));
+                                return;
+                            }
+                        }
+                    } else {
+                        logits
+                    };
+
+                    // Conditional repeat penalty - skip when == 1.0 for performance
+                    let logits = if repeat_penalty != 1.0 {
+                        let start_at = all_tokens.len().saturating_sub(repeat_last_n);
+                        match candle_transformers::utils::apply_repeat_penalty(
+                            &logits,
+                            repeat_penalty as f32,
+                            &all_tokens[start_at..],
+                        ) {
+                            Ok(l) => l,
+                            Err(e) => {
+                                let _ = tx.send(CandleCompletionChunk::Error(format!(
+                                    "Repeat penalty failed: {}",
+                                    e
+                                )));
+                                return;
+                            }
+                        }
+                    } else {
+                        logits // Skip expensive operation when not needed
+                    };
+
+                    next_token = match logits_processor.sample(&logits) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            let _ = tx.send(CandleCompletionChunk::Error(format!(
+                                "Sampling failed: {}",
+                                e
+                            )));
+                            return;
+                        }
+                    };
+
+                    all_tokens.push(next_token);
+
+                    // Send token through stream (check for tool calls)
+                    if let Some(text) = tos.next_token(next_token).ok().flatten() {
+                        if let Some(tool_call) = tool_parser.process_token(&text) {
+                            log::info!("🔧 Tool call detected: {}", tool_call.name);
+
+                            // Emit ToolCallComplete chunk
+                            let _ = tx.send(CandleCompletionChunk::ToolCallComplete {
+                                id: Uuid::new_v4().to_string(),
+                                name: tool_call.name,
+                                input: tool_call.arguments,
+                            });
+                        } else {
+                            // Regular text chunk
+                            let _ = tx.send(CandleCompletionChunk::Text(text));
+                        }
+                    }
+                }
+
+                // Flush any remaining tokens
+                if let Ok(Some(text)) = tos.decode_rest()
+                    && !text.is_empty()
+                {
+                    if let Some(tool_call) = tool_parser.process_token(&text) {
+                        log::info!("🔧 Tool call detected in final flush: {}", tool_call.name);
+
+                        // Emit ToolCallComplete chunk
+                        let _ = tx.send(CandleCompletionChunk::ToolCallComplete {
+                            id: Uuid::new_v4().to_string(),
+                            name: tool_call.name,
+                            input: tool_call.arguments,
+                        });
+                    } else {
+                        // Regular text chunk
+                        let _ = tx.send(CandleCompletionChunk::Text(text));
+                    }
+                }
+            })
+        }))
+    }
+}
+
+impl std::fmt::Debug for LoadedQwen3QuantizedModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoadedQwen3QuantizedModel")
+            .field("device", &self.device)
+            .field("model", &"Arc<Mutex<Qwen3Model>>")
+            .field("eos_token_id", &self.eos_token_id)
+            .finish()
+    }
+}
+
+impl CandleModel for LoadedQwen3QuantizedModel {
+    #[inline]
+    fn info(&self) -> &'static CandleModelInfo {
+        &QWEN3_QUANTIZED_MODEL_INFO
+    }
+}
+
+impl Default for CandleQwen3QuantizedModel {
+    fn default() -> Self {
+        Self::new().unwrap_or_else(|e| panic!("Failed to initialize Qwen3 Quantized model: {}", e))
+    }
+}
