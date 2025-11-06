@@ -17,6 +17,15 @@ keywords = [
 ]
 license = "Apache-2.0 OR MIT"
 
+
+[package.metadata.bundle]
+identifier = "ai.kodegen.kodegen_candle_agent"
+publisher = "KODEGEN.ᴀɪ"
+category = "Developer Tool"
+copyright = "Copyright © 2025"
+short_description = "Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
+
+
 [dependencies]
 
 bitflags = { version = "2", features = ["serde"] }
