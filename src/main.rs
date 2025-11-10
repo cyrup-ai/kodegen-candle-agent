@@ -19,43 +19,45 @@ async fn main() -> Result<()> {
     // Initialize CoordinatorPool before run_http_server (async initialization)
     let pool = initialize_coordinator_pool().await?;
 
-    run_http_server("candle-agent", move |_config, _tracker| {
-        let mut tool_router = ToolRouter::new();
-        let mut prompt_router = PromptRouter::new();
-        let managers = Managers::new();
+    run_http_server("candle-agent", |_config, _tracker| {
+        Box::pin(async move {
+            let mut tool_router = ToolRouter::new();
+            let mut prompt_router = PromptRouter::new();
+            let managers = Managers::new();
 
-        // Create memorize session manager
-        let memorize_manager = Arc::new(MemorizeSessionManager::new(pool.clone()));
+            // Create memorize session manager
+            let memorize_manager = Arc::new(MemorizeSessionManager::new(pool.clone()));
 
-        // Register memory tools (4 tools now - memorize and check_memorize_status use manager)
-        (tool_router, prompt_router) = register_tool(
-            tool_router,
-            prompt_router,
-            MemorizeTool::new(memorize_manager.clone()),
-        );
+            // Register memory tools (4 tools now - memorize and check_memorize_status use manager)
+            (tool_router, prompt_router) = register_tool(
+                tool_router,
+                prompt_router,
+                MemorizeTool::new(memorize_manager.clone()),
+            );
 
-        (tool_router, prompt_router) = register_tool(
-            tool_router,
-            prompt_router,
-            CheckMemorizeStatusTool::new(memorize_manager.clone()),
-        );
+            (tool_router, prompt_router) = register_tool(
+                tool_router,
+                prompt_router,
+                CheckMemorizeStatusTool::new(memorize_manager.clone()),
+            );
 
-        (tool_router, prompt_router) = register_tool(
-            tool_router,
-            prompt_router,
-            RecallTool::new(pool.clone()),
-        );
+            (tool_router, prompt_router) = register_tool(
+                tool_router,
+                prompt_router,
+                RecallTool::new(pool.clone()),
+            );
 
-        (tool_router, prompt_router) = register_tool(
-            tool_router,
-            prompt_router,
-            ListMemoryLibrariesTool::new(pool.clone()),
-        );
+            (tool_router, prompt_router) = register_tool(
+                tool_router,
+                prompt_router,
+                ListMemoryLibrariesTool::new(pool.clone()),
+            );
 
-        // CRITICAL: Start cleanup task after all tools registered
-        memorize_manager.start_cleanup_task();
+            // CRITICAL: Start cleanup task after all tools registered
+            memorize_manager.start_cleanup_task();
 
-        Ok(RouterSet::new(tool_router, prompt_router, managers))
+            Ok(RouterSet::new(tool_router, prompt_router, managers))
+        })
     })
     .await
 }

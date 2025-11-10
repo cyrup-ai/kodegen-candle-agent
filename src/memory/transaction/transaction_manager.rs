@@ -187,47 +187,52 @@ impl TransactionManager {
 
         // Execute operations and capture result
         let commit_result = async {
-            let sdk_tx =
-                self.db.transaction().await.map_err(|e| {
-                    TransactionError::DatabaseError(format!("BEGIN failed: {:?}", e))
-                })?;
-
-            for operation in &tx.operations {
+            // Build the complete transaction SQL dynamically
+            let mut statements = Vec::new();
+            let mut params = serde_json::Map::new();
+            
+            // Process each operation and build SQL + params
+            for (idx, operation) in tx.operations.iter().enumerate() {
                 match operation {
                     Operation::Insert { table, id, data } => {
-                        sdk_tx
-                            .create::<Option<serde_json::Value>>((table.as_str(), id.as_str()))
-                            .content(data.clone())
-                            .await
-                            .map_err(|e| {
-                                TransactionError::DatabaseError(format!("INSERT failed: {:?}", e))
-                            })?;
+                        statements.push(format!(
+                            "CREATE {}:{} CONTENT $data_{};",
+                            table, id, idx
+                        ));
+                        params.insert(format!("data_{}", idx), data.clone());
                     }
                     Operation::Update { table, id, data } => {
-                        sdk_tx
-                            .update::<Option<serde_json::Value>>((table.as_str(), id.as_str()))
-                            .content(data.clone())
-                            .await
-                            .map_err(|e| {
-                                TransactionError::DatabaseError(format!("UPDATE failed: {:?}", e))
-                            })?;
+                        statements.push(format!(
+                            "UPDATE {}:{} CONTENT $data_{};",
+                            table, id, idx
+                        ));
+                        params.insert(format!("data_{}", idx), data.clone());
                     }
                     Operation::Delete { table, id } => {
-                        sdk_tx
-                            .delete::<Option<serde_json::Value>>((table.as_str(), id.as_str()))
-                            .await
-                            .map_err(|e| {
-                                TransactionError::DatabaseError(format!("DELETE failed: {:?}", e))
-                            })?;
+                        statements.push(format!(
+                            "DELETE {}:{};",
+                            table, id
+                        ));
                     }
                 }
             }
-
-            sdk_tx
-                .commit()
-                .await
-                .map_err(|e| TransactionError::DatabaseError(format!("COMMIT failed: {:?}", e)))?;
-
+            
+            // Wrap in transaction
+            let query = format!(
+                "BEGIN TRANSACTION; {} COMMIT TRANSACTION;",
+                statements.join(" ")
+            );
+            
+            // Build query with bindings
+            let mut query_builder = self.db.query(&query);
+            for (key, value) in params {
+                query_builder = query_builder.bind((key, value));
+            }
+            
+            // Execute transaction
+            query_builder.await
+                .map_err(|e| TransactionError::DatabaseError(format!("Transaction failed: {:?}", e)))?;
+            
             Ok::<(), TransactionError>(())
         }
         .await;
