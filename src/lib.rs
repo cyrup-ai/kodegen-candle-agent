@@ -151,12 +151,12 @@ pub async fn start_server(
     tls_key: Option<std::path::PathBuf>,
 ) -> anyhow::Result<kodegen_server_http::ServerHandle> {
     use kodegen_server_http::{Managers, RouterSet, register_tool};
-    use kodegen_config_manager::ConfigManager;
+    use kodegen_tools_config::ConfigManager;
     use rmcp::handler::server::router::{prompt::PromptRouter, tool::ToolRouter};
 
     let _ = env_logger::try_init();
 
-    if let Err(_) = rustls::crypto::ring::default_provider().install_default() {
+    if rustls::crypto::ring::default_provider().install_default().is_err() {
         log::debug!("rustls crypto provider already installed");
     }
 

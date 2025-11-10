@@ -38,6 +38,7 @@ kodegen_server_http = { version = "0.1" }
 kodegen_mcp_client = { version = "0.1" }
 kodegen_tools_git = { version = "0.1" }
 kodegen_config_manager = { version = "0.1" }
+kodegen_tools_config = { version = "0.1" }
 kodegen_utils = { version = "0.1" }
 
 bitflags = { version = "2", features = ["serde"] }
