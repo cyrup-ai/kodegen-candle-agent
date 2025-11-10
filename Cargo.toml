@@ -1,6 +1,6 @@
 [package]
 name = "kodegen_candle_agent"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "KODEGEN.ᴀɪ: Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
 authors = ["KODEGEN.ᴀɪ"]
@@ -37,13 +37,13 @@ cylo = { version = "0.1" }
 ctrlc = { version = "3", features = ["termination"] }
 
 # Workspace MCP infrastructure
-kodegen_mcp_tool = { version = "0.1", path = "../kodegen-mcp-tool" }
-kodegen_mcp_schema = { version = "0.1", path = "../kodegen-mcp-schema" }
-kodegen_server_http = { version = "0.1", path = "../kodegen-server-http" }
-kodegen_mcp_client = { version = "0.1", path = "../kodegen-mcp-client" }
-kodegen_tools_git = { version = "0.1", path = "../kodegen-tools-git" }
-kodegen_tools_config = { version = "0.1", path = "../kodegen-tools-config" }
-kodegen_utils = { version = "0.1", path = "../kodegen-utils" }
+kodegen_mcp_tool = { version = "0.1" }
+kodegen_mcp_schema = { version = "0.1" }
+kodegen_server_http = { version = "0.1" }
+kodegen_mcp_client = { version = "0.1" }
+kodegen_tools_git = { version = "0.1" }
+kodegen_tools_config = { version = "0.1" }
+kodegen_utils = { version = "0.1" }
 rmcp = { version = "0.8", features = ["client", "schemars", "server", "transport-child-process", "transport-io", "transport-sse-client", "transport-sse-client-reqwest", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
 
 # Keep simd-json for potential other performance needs (not for MCP types)
