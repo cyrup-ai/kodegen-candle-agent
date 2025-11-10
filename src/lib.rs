@@ -151,7 +151,7 @@ pub async fn start_server(
     tls_key: Option<std::path::PathBuf>,
 ) -> anyhow::Result<()> {
     use kodegen_server_http::{Managers, RouterSet, register_tool};
-    use kodegen_tools_config::ConfigManager;
+    use kodegen_config_manager::ConfigManager;
     use rmcp::handler::server::router::{prompt::PromptRouter, tool::ToolRouter};
 
     let _ = env_logger::try_init();
