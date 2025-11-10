@@ -149,7 +149,7 @@ pub async fn start_server(
     addr: std::net::SocketAddr,
     tls_cert: Option<std::path::PathBuf>,
     tls_key: Option<std::path::PathBuf>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<kodegen_server_http::ServerHandle> {
     use kodegen_server_http::{Managers, RouterSet, register_tool};
     use kodegen_config_manager::ConfigManager;
     use rmcp::handler::server::router::{prompt::PromptRouter, tool::ToolRouter};
@@ -239,11 +239,8 @@ pub async fn start_server(
     let shutdown_timeout = std::time::Duration::from_secs(30);
     let handle = server.serve_with_tls(addr, tls_config, shutdown_timeout).await?;
 
-    // Wait for completion (kodegend controls shutdown)
-    handle.wait_for_completion(shutdown_timeout).await
-        .map_err(|e| anyhow::anyhow!("Server shutdown error: {:?}", e))?;
-
-    Ok(())
+    // Return handle for kodegend to control shutdown
+    Ok(handle)
 }
 
 // Helper function for pool initialization
