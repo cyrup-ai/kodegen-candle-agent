@@ -2,11 +2,11 @@
 
 use kodegen_mcp_tool::{Tool, error::McpError};
 use kodegen_mcp_schema::claude_agent::{CheckMemorizeStatusArgs, CheckMemorizeStatusPromptArgs};
-use rmcp::model::{PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole};
-use serde_json::{Value, json};
+use rmcp::model::{PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole, Content};
+use serde_json::json;
 use std::sync::Arc;
 
-use super::memorize_manager::MemorizeSessionManager;
+use super::memorize_manager::{MemorizeSessionManager, MemorizeStatus};
 
 // ============================================================================
 // TOOL STRUCT
@@ -32,7 +32,7 @@ impl Tool for CheckMemorizeStatusTool {
     type PromptArgs = CheckMemorizeStatusPromptArgs;
 
     fn name() -> &'static str {
-        "check_memorize_status"
+        "memory_check_memorize_status"
     }
 
     fn description() -> &'static str {
@@ -51,15 +51,63 @@ impl Tool for CheckMemorizeStatusTool {
         true
     }
 
-    async fn execute(&self, args: Self::Args) -> Result<Value, McpError> {
+    async fn execute(&self, args: Self::Args) -> Result<Vec<Content>, McpError> {
         let response = self
             .manager
             .get_status(&args.session_id)
             .await
             .map_err(|e| McpError::Other(anyhow::anyhow!("Failed to get status: {}", e)))?;
 
-        // Return structured JSON response
-        Ok(json!({
+        let mut contents = Vec::new();
+
+        // Terminal summary based on status
+        let summary = match response.status {
+            MemorizeStatus::InProgress => {
+                format!(
+                    "⏳ Memorization in progress\n\n\
+                     Session: {}\n\
+                     Library: {}\n\
+                     Stage: {}\n\
+                     Files loaded: {}\n\
+                     Runtime: {:.1}s",
+                    response.session_id,
+                    response.library,
+                    response.progress.stage,
+                    response.progress.files_loaded,
+                    response.runtime_ms as f64 / 1000.0
+                )
+            },
+            MemorizeStatus::Completed => {
+                format!(
+                    "✓ Memorization completed\n\n\
+                     Session: {}\n\
+                     Library: {}\n\
+                     Memory ID: {}\n\
+                     Runtime: {:.1}s",
+                    response.session_id,
+                    response.library,
+                    response.memory_id.as_deref().unwrap_or("unknown"),
+                    response.runtime_ms as f64 / 1000.0
+                )
+            },
+            MemorizeStatus::Failed => {
+                format!(
+                    "✗ Memorization failed\n\n\
+                     Session: {}\n\
+                     Library: {}\n\
+                     Error: {}\n\
+                     Runtime: {:.1}s",
+                    response.session_id,
+                    response.library,
+                    response.error.as_deref().unwrap_or("Unknown error"),
+                    response.runtime_ms as f64 / 1000.0
+                )
+            },
+        };
+        contents.push(Content::text(summary));
+
+        // JSON metadata
+        let metadata = json!({
             "session_id": response.session_id,
             "status": response.status,
             "memory_id": response.memory_id,
@@ -71,7 +119,12 @@ impl Tool for CheckMemorizeStatusTool {
             },
             "runtime_ms": response.runtime_ms,
             "error": response.error,
-        }))
+        });
+        let json_str = serde_json::to_string_pretty(&metadata)
+            .unwrap_or_else(|_| "{}".to_string());
+        contents.push(Content::text(json_str));
+
+        Ok(contents)
     }
 
     fn prompt_arguments() -> Vec<PromptArgument> {

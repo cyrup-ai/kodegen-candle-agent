@@ -79,7 +79,7 @@ Ingest files or directories into a named memory library:
 
 ```json
 {
-  "tool": "memorize",
+  "tool": "memory_memorize",
   "arguments": {
     "input": "/path/to/your/codebase",
     "library": "my-project"
@@ -95,7 +95,7 @@ Poll the progress of a memorization task:
 
 ```json
 {
-  "tool": "check_memorize_status",
+  "tool": "memory_check_memorize_status",
   "arguments": {
     "session_id": "your-session-id"
   }
@@ -110,7 +110,7 @@ Search for relevant memories using semantic similarity:
 
 ```json
 {
-  "tool": "recall",
+  "tool": "memory_recall",
   "arguments": {
     "query": "authentication logic",
     "library": "my-project",
@@ -127,7 +127,7 @@ Enumerate all available memory libraries:
 
 ```json
 {
-  "tool": "list_memory_libraries",
+  "tool": "memory_list_libraries",
   "arguments": {}
 }
 ```

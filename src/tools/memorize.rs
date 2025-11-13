@@ -2,8 +2,8 @@
 
 use kodegen_mcp_tool::{Tool, error::McpError};
 use kodegen_mcp_schema::claude_agent::{MemorizeArgs, MemorizePromptArgs};
-use rmcp::model::{PromptArgument, PromptMessage};
-use serde_json::{Value, json};
+use rmcp::model::{PromptArgument, PromptMessage, Content};
+use serde_json::json;
 use std::sync::Arc;
 
 use super::memorize_manager::MemorizeSessionManager;
@@ -24,7 +24,7 @@ impl Tool for MemorizeTool {
     type PromptArgs = MemorizePromptArgs;
 
     fn name() -> &'static str {
-        "memorize"
+        "memory_memorize"
     }
 
     fn description() -> &'static str {
@@ -46,7 +46,7 @@ impl Tool for MemorizeTool {
         false // Creates new memories each time
     }
 
-    async fn execute(&self, args: Self::Args) -> Result<Value, McpError> {
+    async fn execute(&self, args: Self::Args) -> Result<Vec<Content>, McpError> {
         // Start async memorize session (returns immediately)
         let session_id = self
             .manager
@@ -54,12 +54,29 @@ impl Tool for MemorizeTool {
             .await
             .map_err(|e| McpError::Other(anyhow::anyhow!("Failed to start memorize session: {}", e)))?;
 
-        Ok(json!({
+        let mut contents = Vec::new();
+
+        let summary = format!(
+            "✓ Memorization started\n\n\
+             Session: {}\n\
+             Library: {}\n\
+             Status: IN_PROGRESS\n\n\
+             Use check_memorize_status to monitor progress",
+            session_id, args.library
+        );
+        contents.push(Content::text(summary));
+
+        let metadata = json!({
             "session_id": session_id,
             "status": "IN_PROGRESS",
             "library": args.library,
             "message": "Memorization started in background. Use check_memorize_status to monitor progress."
-        }))
+        });
+        let json_str = serde_json::to_string_pretty(&metadata)
+            .unwrap_or_else(|_| "{}".to_string());
+        contents.push(Content::text(json_str));
+
+        Ok(contents)
     }
 
     fn prompt_arguments() -> Vec<PromptArgument> {

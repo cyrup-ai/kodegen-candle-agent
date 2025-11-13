@@ -15,7 +15,7 @@ use tokio_stream::Stream;
 use crate::domain::context::chunks::CandleJsonChunk;
 use cylo::{BackendConfig, Cylo, ExecutionRequest, ExecutionResult, create_backend};
 use kodegen_mcp_client::KodegenClient;
-use rmcp::model::Tool as RmcpTool;
+use rmcp::model::{Tool as RmcpTool, Content};
 
 /// Candle Tool Router
 ///
@@ -78,7 +78,7 @@ trait ToolExecutor: Send + Sync {
     fn execute(
         &self,
         args: Value,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<Value, RouterError>> + Send>>;
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<Content>, RouterError>> + Send>>;
 }
 
 /// Wrapper for Tool trait implementations
@@ -118,7 +118,7 @@ impl<T: kodegen_mcp_tool::Tool> ToolExecutor for ToolWrapper<T> {
     fn execute(
         &self,
         args: Value,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<Value, RouterError>> + Send>> {
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<Content>, RouterError>> + Send>> {
         // Deserialize args to tool's Args type
         let typed_args: Result<T::Args, _> = serde_json::from_value(args);
 
@@ -218,7 +218,8 @@ impl CandleToolRouter {
         // Try local tools first
         let executor = self.local_tools.read().get(name).cloned();
         if let Some(executor) = executor {
-            return executor.execute(args).await;
+            let contents = executor.execute(args).await?;
+            return Self::contents_to_value(&contents);
         }
 
         // Try remote MCP client
@@ -464,6 +465,34 @@ impl CandleToolRouter {
         // Try to parse as JSON, or return as string if not JSON
         serde_json::from_str(&text_content.text)
             .or_else(|_| Ok(serde_json::json!({"result": text_content.text})))
+    }
+
+    /// Convert Vec<Content> to JSON Value (extract from second Content)
+    ///
+    /// Tool responses contain:
+    /// - First Content: Human-readable summary (terminal output)
+    /// - Second Content: Pretty-printed JSON metadata (agent-parseable)
+    ///
+    /// We extract and parse the JSON from the second Content for internal routing.
+    fn contents_to_value(contents: &[Content]) -> Result<Value, RouterError> {
+        if contents.len() < 2 {
+            return Err(RouterError::ToolError(
+                "Invalid tool response: expected 2 Content items (summary + JSON)".to_string()
+            ));
+        }
+
+        // Extract JSON string from second Content
+        let json_content = contents
+            .get(1)
+            .and_then(|c| c.as_text())
+            .ok_or_else(|| {
+                RouterError::ToolError("Second Content is not text".to_string())
+            })?;
+
+        // Parse JSON string to Value
+        serde_json::from_str(&json_content.text).map_err(|e| {
+            RouterError::ToolError(format!("Failed to parse JSON metadata: {e}"))
+        })
     }
 }
 

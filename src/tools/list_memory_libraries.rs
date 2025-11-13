@@ -2,8 +2,8 @@
 
 use kodegen_mcp_tool::{Tool, error::McpError};
 use kodegen_mcp_schema::claude_agent::{ListMemoryLibrariesArgs, ListMemoryLibrariesPromptArgs};
-use rmcp::model::{PromptArgument, PromptMessage};
-use serde_json::{Value, json};
+use rmcp::model::{PromptArgument, PromptMessage, Content};
+use serde_json::json;
 use std::sync::Arc;
 
 use crate::memory::core::manager::pool::CoordinatorPool;
@@ -24,7 +24,7 @@ impl Tool for ListMemoryLibrariesTool {
     type PromptArgs = ListMemoryLibrariesPromptArgs;
 
     fn name() -> &'static str {
-        "list_memory_libraries"
+        "memory_list_libraries"
     }
 
     fn description() -> &'static str {
@@ -37,7 +37,7 @@ impl Tool for ListMemoryLibrariesTool {
         true
     }
 
-    async fn execute(&self, _args: Self::Args) -> Result<Value, McpError> {
+    async fn execute(&self, _args: Self::Args) -> Result<Vec<Content>, McpError> {
         // Use pool's list_libraries() which scans filesystem
         let libraries = self.pool.list_libraries()
             .await
@@ -45,10 +45,35 @@ impl Tool for ListMemoryLibrariesTool {
 
         let count = libraries.len();
 
-        Ok(json!({
+        let mut contents = Vec::new();
+
+        // Terminal summary
+        let summary = if libraries.is_empty() {
+            "✓ No memory libraries found\n\n\
+             Create a library by using memorize with a new library name".to_string()
+        } else {
+            let library_list = libraries.iter()
+                .map(|lib| format!("  • {}", lib))
+                .collect::<Vec<_>>()
+                .join("\n");
+            
+            format!(
+                "✓ Memory libraries found ({})\n\n{}",
+                count, library_list
+            )
+        };
+        contents.push(Content::text(summary));
+
+        // JSON metadata
+        let metadata = json!({
             "libraries": libraries,
             "count": count
-        }))
+        });
+        let json_str = serde_json::to_string_pretty(&metadata)
+            .unwrap_or_else(|_| "{}".to_string());
+        contents.push(Content::text(json_str));
+
+        Ok(contents)
     }
 
     fn prompt_arguments() -> Vec<PromptArgument> {
