@@ -1,7 +1,7 @@
 //! Recall Tool - Retrieve relevant memories from a library using semantic search
 
 use kodegen_mcp_tool::{Tool, error::McpError};
-use kodegen_mcp_schema::claude_agent::{RecallArgs, RecallPromptArgs};
+use kodegen_mcp_schema::claude_agent::{RecallArgs, RecallPromptArgs, MEMORY_RECALL};
 use rmcp::model::{PromptArgument, PromptMessage, Content};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -26,7 +26,7 @@ impl Tool for RecallTool {
     type PromptArgs = RecallPromptArgs;
 
     fn name() -> &'static str {
-        "memory_recall"
+        MEMORY_RECALL
     }
 
     fn description() -> &'static str {

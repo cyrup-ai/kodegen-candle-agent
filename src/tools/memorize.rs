@@ -1,7 +1,7 @@
 //! Memorize Tool - Store content in a named memory library (async session-based)
 
 use kodegen_mcp_tool::{Tool, error::McpError};
-use kodegen_mcp_schema::claude_agent::{MemorizeArgs, MemorizePromptArgs};
+use kodegen_mcp_schema::claude_agent::{MemorizeArgs, MemorizePromptArgs, MEMORY_MEMORIZE};
 use rmcp::model::{PromptArgument, PromptMessage, Content};
 use serde_json::json;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ impl Tool for MemorizeTool {
     type PromptArgs = MemorizePromptArgs;
 
     fn name() -> &'static str {
-        "memory_memorize"
+        MEMORY_MEMORIZE
     }
 
     fn description() -> &'static str {

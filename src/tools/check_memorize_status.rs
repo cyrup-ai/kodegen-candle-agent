@@ -1,7 +1,7 @@
 //! Check Memorize Status Tool - Monitor async memorize operations
 
 use kodegen_mcp_tool::{Tool, error::McpError};
-use kodegen_mcp_schema::claude_agent::{CheckMemorizeStatusArgs, CheckMemorizeStatusPromptArgs};
+use kodegen_mcp_schema::claude_agent::{CheckMemorizeStatusArgs, CheckMemorizeStatusPromptArgs, MEMORY_CHECK_MEMORIZE_STATUS};
 use rmcp::model::{PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole, Content};
 use serde_json::json;
 use std::sync::Arc;
@@ -32,7 +32,7 @@ impl Tool for CheckMemorizeStatusTool {
     type PromptArgs = CheckMemorizeStatusPromptArgs;
 
     fn name() -> &'static str {
-        "memory_check_memorize_status"
+        MEMORY_CHECK_MEMORIZE_STATUS
     }
 
     fn description() -> &'static str {

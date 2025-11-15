@@ -1,7 +1,7 @@
 //! List Memory Libraries Tool - List all unique library names
 
 use kodegen_mcp_tool::{Tool, error::McpError};
-use kodegen_mcp_schema::claude_agent::{ListMemoryLibrariesArgs, ListMemoryLibrariesPromptArgs};
+use kodegen_mcp_schema::claude_agent::{ListMemoryLibrariesArgs, ListMemoryLibrariesPromptArgs, MEMORY_LIST_LIBRARIES};
 use rmcp::model::{PromptArgument, PromptMessage, Content};
 use serde_json::json;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ impl Tool for ListMemoryLibrariesTool {
     type PromptArgs = ListMemoryLibrariesPromptArgs;
 
     fn name() -> &'static str {
-        "memory_list_libraries"
+        MEMORY_LIST_LIBRARIES
     }
 
     fn description() -> &'static str {
