@@ -1,6 +1,6 @@
 [package]
 name = "kodegen_candle_agent"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 description = "KODEGEN.ᴀɪ: Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
 authors = ["KODEGEN.ᴀɪ"]
@@ -39,9 +39,9 @@ kodegen_mcp_client = { version = "0.2" }
 kodegen_tools_git = { version = "0.2" }
 kodegen_config_manager = { version = "0.2" }
 kodegen_utils = { version = "0.2" }
+cylo = { version = "0.2" }
 
 bitflags = { version = "2", features = ["serde"] }
-cylo = { version = "0.1" }
 ctrlc = { version = "3", features = ["termination"] }
 
 # Workspace MCP infrastructure
