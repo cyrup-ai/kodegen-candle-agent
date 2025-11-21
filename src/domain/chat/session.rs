@@ -27,7 +27,7 @@ use crate::domain::chat::{
 use crate::domain::completion::CandleCompletionChunk;
 use crate::domain::completion::CandleCompletionParams;
 use crate::domain::prompt::CandlePrompt;
-use crate::domain::tool::CandleToolRouter;
+
 
 use crate::builders::agent_role::AgentBuilderState;
 use crate::capability::registry::TextToTextModel;
@@ -154,19 +154,23 @@ fn process_break_loop() -> CandleMessageChunk {
     }
 }
 
-/// Initialize tool router (using workspace MCP infrastructure)
-async fn initialize_tool_router(
-    sender: &tokio::sync::mpsc::UnboundedSender<CandleMessageChunk>,
-) -> Option<CandleToolRouter> {
-    // Create router with no remote MCP client (local tools only)
-    let mut router = CandleToolRouter::new(None);
-    if let Err(e) = router.initialize().await {
-        let error_chunk =
-            CandleMessageChunk::Error(format!("Failed to initialize tool router: {e}"));
-        let _ = sender.send(error_chunk);
-        return None;
+/// Initialize MCP client for tool execution
+async fn initialize_mcp_client(
+    _sender: &tokio::sync::mpsc::UnboundedSender<CandleMessageChunk>,
+) -> Option<kodegen_mcp_client::KodegenClient> {
+    // Spawn local kodegen binary for tool execution
+    use kodegen_mcp_client::create_stdio_client;
+
+    match create_stdio_client("kodegen", &[]).await {
+        Ok((client, _connection)) => {
+            log::info!("✅ Spawned kodegen process for tool execution");
+            Some(client)
+        }
+        Err(e) => {
+            log::warn!("Failed to spawn kodegen: {e} - Tools will not be available");
+            None
+        }
     }
-    Some(router)
 }
 
 /// Search memory and format context
@@ -314,7 +318,7 @@ async fn stream_and_process_chunks(
     completion_stream: Pin<Box<dyn Stream<Item = CandleCompletionChunk> + Send>>,
     sender: &tokio::sync::mpsc::UnboundedSender<CandleMessageChunk>,
     chat_config: &CandleChatConfig,
-    tool_router: Option<&CandleToolRouter>,
+    mcp_client: Option<&kodegen_mcp_client::KodegenClient>,
     on_chunk_handler: Option<&OnChunkHandler>,
     on_tool_result_handler: Option<&OnToolResultHandler>,
 ) -> String {
@@ -370,7 +374,7 @@ async fn stream_and_process_chunks(
                 partial_input,
             },
             CandleCompletionChunk::ToolCallComplete { id: _, name, input } => {
-                execute_tool_call(&name, &input, tool_router, on_tool_result_handler).await
+                execute_tool_call(&name, &input, mcp_client, sender, on_tool_result_handler).await
             }
             CandleCompletionChunk::Error(error) => CandleMessageChunk::Error(error),
         };
@@ -523,32 +527,35 @@ async fn invoke_turn_handler_if_configured(
 }
 
 /// Execute a tool call and return the result as a message chunk
+///
+/// Executes tool calls via MCP client.
 async fn execute_tool_call(
     name: &str,
     input: &str,
-    tool_router: Option<&CandleToolRouter>,
+    mcp_client: Option<&kodegen_mcp_client::KodegenClient>,
+    _sender: &tokio::sync::mpsc::UnboundedSender<CandleMessageChunk>,
     on_tool_result_handler: Option<&OnToolResultHandler>,
 ) -> CandleMessageChunk {
-    if let Some(router) = tool_router {
+    if let Some(client) = mcp_client {
         match serde_json::from_str::<serde_json::Value>(input) {
-            Ok(args_json) => match router.call_tool(name, args_json).await {
-                Ok(response) => {
-                    if let Some(handler) = on_tool_result_handler {
-                        let results = vec![format!("{response:?}")];
-                        handler(&results).await;
+            Ok(args_json) => {
+                match client.call_tool(name, args_json).await {
+                    Ok(response) => {
+                        if let Some(handler) = on_tool_result_handler {
+                            let results = vec![format!("{response:?}")];
+                            handler(&results).await;
+                        }
+                        let result_str = serde_json::to_string_pretty(&response)
+                            .unwrap_or_else(|_| format!("{response:?}"));
+                        CandleMessageChunk::Text(format!("\n[Tool: {name}]\n{result_str}\n"))
                     }
-                    CandleMessageChunk::Text(format!("Tool '{name}' executed: {response:?}"))
+                    Err(e) => CandleMessageChunk::Error(format!("Tool '{name}' failed: {e}")),
                 }
-                Err(e) => CandleMessageChunk::Error(format!("Tool '{name}' failed: {e}")),
-            },
+            }
             Err(e) => CandleMessageChunk::Error(format!("Invalid JSON: {e}")),
         }
     } else {
-        CandleMessageChunk::ToolCallComplete {
-            id: String::new(),
-            name: name.to_string(),
-            input: input.to_string(),
-        }
+        CandleMessageChunk::Error("MCP client not available".to_string())
     }
 }
 
@@ -578,11 +585,8 @@ async fn handle_user_prompt<S: std::hash::BuildHasher>(
         return;
     }
 
-    // Initialize tool router
-    let tool_router = initialize_tool_router(sender).await;
-    if tool_router.is_none() {
-        return; // Error already sent
-    }
+    // Initialize MCP client for tool execution
+    let mcp_client = initialize_mcp_client(sender).await;
 
     // Search memory and build prompt
     let memory_context = search_and_format_memory(memory, &user_message).await;
@@ -600,10 +604,13 @@ async fn handle_user_prompt<S: std::hash::BuildHasher>(
     };
 
     // Add tools
-    if let Some(ref router) = tool_router {
+    if let Some(ref client) = mcp_client {
         let mut all_tools: Vec<ToolInfo> = tools.to_vec();
-        let auto_generated_tools = router.get_available_tools().await;
-        all_tools.extend(auto_generated_tools);
+        
+        // Get tools from kodegen via MCP
+        if let Ok(kodegen_tools) = client.list_tools().await {
+            all_tools.extend(kodegen_tools);
+        }
 
         if !all_tools.is_empty() {
             params.tools = Some(ZeroOneOrMany::from(all_tools));
@@ -616,7 +623,7 @@ async fn handle_user_prompt<S: std::hash::BuildHasher>(
         completion_stream,
         sender,
         chat_config,
-        tool_router.as_ref(),
+        mcp_client.as_ref(),
         on_chunk_handler,
         on_tool_result_handler,
     )

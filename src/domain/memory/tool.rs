@@ -147,6 +147,7 @@ impl MemoryTool {
             output_schema: None,
             annotations: None,
             icons: None,
+            meta: None,
         };
 
         Self { data, memory }

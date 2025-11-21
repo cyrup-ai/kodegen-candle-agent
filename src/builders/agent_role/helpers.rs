@@ -5,8 +5,8 @@ use crate::capability::registry::TextToTextModel;
 use crate::capability::text_to_text::qwen3_quantized::LoadedQwen3QuantizedModel;
 use crate::domain::agent::core::AGENT_STATS;
 use crate::domain::completion::types::ToolInfo;
-use crate::domain::tool::{CandleToolRouter, ToolSelector};
-use kodegen_mcp_client::create_streamable_client;
+use crate::domain::tool::ToolSelector;
+use kodegen_mcp_client::create_stdio_client;
 
 pub struct CandleAgentRoleAgent {
     state: Arc<AgentBuilderState>,
@@ -52,10 +52,10 @@ impl CandleAgentRoleAgent {
             move |stream_sender| async move {
                 // Extract handlers from state for recursive inference
                 let on_chunk_handler = state.on_chunk_handler.clone();
-                let on_tool_result_handler = state.on_tool_result_handler.clone();
+                let _on_tool_result_handler = state.on_tool_result_handler.clone();
 
-                // Connect to kodegen MCP daemon for real tool execution
-                let tool_router = match create_streamable_client("https://mcp.kodegen.ai:30437/mcp").await
+                // Spawn local kodegen binary for tool execution
+                let mcp_client = match create_stdio_client("kodegen", &[]).await
                 {
                     Ok((client, _connection)) => {
                         // Connection established - client is cheaply clone-able
@@ -67,15 +67,16 @@ impl CandleAgentRoleAgent {
                             .unwrap_or(0);
 
                         log::info!(
-                            "✅ Connected to MCP daemon - {} tools available",
+                            "✅ Spawned kodegen process - {} tools available",
                             tool_count
                         );
-                        Some(CandleToolRouter::new(Some(client)))
+
+                        Some(client)
                     }
                     Err(e) => {
-                        // Daemon unavailable - agent will work without tools
+                        // Failed to spawn kodegen - agent will work without tools
                         log::warn!(
-                            "⚠️  MCP daemon unavailable: {} - Agent will work without tools",
+                            "⚠️  Failed to spawn kodegen: {} - Agent will work without tools",
                             e
                         );
                         None
@@ -94,12 +95,13 @@ impl CandleAgentRoleAgent {
                 };
 
                 // Add tools
-                if let Some(ref router) = tool_router {
+                if let Some(ref client) = mcp_client {
                     let mut all_tools: Vec<ToolInfo> = state.tools.clone().into();
 
-                    // Use .await instead of block_on
-                    let auto_generated_tools = router.get_available_tools().await;
-                    all_tools.extend(auto_generated_tools);
+                    // Get tools from kodegen via MCP
+                    if let Ok(kodegen_tools) = client.list_tools().await {
+                        all_tools.extend(kodegen_tools);
+                    }
 
                     if !all_tools.is_empty() {
                         // ═══════════════════════════════════════════════════════════
@@ -206,36 +208,32 @@ impl CandleAgentRoleAgent {
                             name,
                             partial_input,
                         },
-                        CandleCompletionChunk::ToolCallComplete { id, name, input } => {
-                            if let Some(ref router) = tool_router {
+                        CandleCompletionChunk::ToolCallComplete { id: _, name, input } => {
+                            // Execute tool via MCP client
+                            if let Some(ref client) = mcp_client {
                                 match serde_json::from_str::<serde_json::Value>(&input) {
                                     Ok(args_json) => {
-                                        // Use .await instead of block_on
-                                        match router.call_tool(&name, args_json).await {
-                                            Ok(response) => {
-                                                // Call tool result handler if configured
-                                                if let Some(ref handler) = on_tool_result_handler {
-                                                    let results = vec![format!("{:?}", response)];
-                                                    handler(&results).await;
-                                                }
-
+                                        match client.call_tool(&name, args_json).await {
+                                            Ok(result) => {
+                                                // Format tool result as text for LLM to see
+                                                let result_str = serde_json::to_string_pretty(&result)
+                                                    .unwrap_or_else(|_| format!("{:?}", result));
                                                 CandleMessageChunk::Text(format!(
-                                                    "Tool '{}' executed: {:?}",
-                                                    name, response
+                                                    "\n[Tool: {}]\n{}\n",
+                                                    name, result_str
                                                 ))
                                             }
-                                            Err(e) => CandleMessageChunk::Error(format!(
-                                                "Tool '{}' failed: {}",
-                                                name, e
-                                            )),
+                                            Err(e) => {
+                                                CandleMessageChunk::Error(format!("Tool '{}' failed: {}", name, e))
+                                            }
                                         }
                                     }
                                     Err(e) => {
-                                        CandleMessageChunk::Error(format!("Invalid JSON: {}", e))
+                                        CandleMessageChunk::Error(format!("Invalid tool input for '{}': {}", name, e))
                                     }
                                 }
                             } else {
-                                CandleMessageChunk::ToolCallComplete { id, name, input }
+                                CandleMessageChunk::Error("MCP client not available".to_string())
                             }
                         }
                         CandleCompletionChunk::Error(error) => CandleMessageChunk::Error(error),

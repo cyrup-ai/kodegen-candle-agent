@@ -1,6 +1,6 @@
 //! Memorize Tool - Store content in a named memory library (async session-based)
 
-use kodegen_mcp_tool::{Tool, error::McpError};
+use kodegen_mcp_tool::{Tool, ToolExecutionContext, error::McpError};
 use kodegen_mcp_schema::claude_agent::{MemorizeArgs, MemorizePromptArgs, MEMORY_MEMORIZE};
 use rmcp::model::{PromptArgument, PromptMessage, Content};
 use serde_json::json;
@@ -46,7 +46,7 @@ impl Tool for MemorizeTool {
         false // Creates new memories each time
     }
 
-    async fn execute(&self, args: Self::Args) -> Result<Vec<Content>, McpError> {
+    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<Vec<Content>, McpError> {
         // Start async memorize session (returns immediately)
         let session_id = self
             .manager

@@ -1,6 +1,6 @@
 //! Recall Tool - Retrieve relevant memories from a library using semantic search
 
-use kodegen_mcp_tool::{Tool, error::McpError};
+use kodegen_mcp_tool::{Tool, ToolExecutionContext, error::McpError};
 use kodegen_mcp_schema::claude_agent::{RecallArgs, RecallPromptArgs, MEMORY_RECALL};
 use rmcp::model::{PromptArgument, PromptMessage, Content};
 use serde_json::{json, Value};
@@ -39,7 +39,7 @@ impl Tool for RecallTool {
         true
     }
 
-    async fn execute(&self, args: Self::Args) -> Result<Vec<Content>, McpError> {
+    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<Vec<Content>, McpError> {
         let start = Instant::now();
 
         // Get coordinator for specified library

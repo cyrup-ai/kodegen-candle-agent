@@ -1,6 +1,6 @@
 [package]
 name = "kodegen_candle_agent"
-version = "0.2.4"
+version = "0.3.2"
 edition = "2024"
 description = "KODEGEN.ᴀɪ: Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
 authors = ["KODEGEN.ᴀɪ"]
@@ -31,21 +31,21 @@ macos = "public.app-category.developer-tools"
 
 [dependencies]
 
-kodegen_simd = { version = "0.2" }
-kodegen_mcp_tool = { version = "0.2" }
-kodegen_mcp_schema = { version = "0.2" }
-kodegen_server_http = { version = "0.2" }
-kodegen_mcp_client = { version = "0.2" }
-kodegen_tools_git = { version = "0.2" }
-kodegen_config_manager = { version = "0.2" }
-kodegen_utils = { version = "0.2" }
-cylo = { version = "0.2" }
+kodegen_simd = { version = "0.3" }
+kodegen_mcp_tool = { version = "0.3" }
+kodegen_mcp_schema = { version = "0.3" }
+kodegen_server_http = { version = "0.3" }
+kodegen_mcp_client = { version = "0.3" }
+kodegen_tools_git = { version = "0.3" }
+kodegen_config_manager = { version = "0.3" }
+kodegen_utils = { version = "0.3" }
+cylo = { version = "0.3" }
 
 bitflags = { version = "2", features = ["serde"] }
 ctrlc = { version = "3", features = ["termination"] }
 
 # Workspace MCP infrastructure
-rmcp = { version = "0.8", features = ["client", "schemars", "server", "transport-child-process", "transport-io", "transport-sse-client", "transport-sse-client-reqwest", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "0.9", features = ["client", "schemars", "server", "transport-child-process", "transport-io", "transport-sse-client", "transport-sse-client-reqwest", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
 
 # Keep simd-json for potential other performance needs (not for MCP types)
 simd-json = { version = "0.17", default-features = false, features = ["known-key", "runtime-detection", "swar-number-parsing", "value-no-dup-keys"] }
@@ -230,6 +230,7 @@ serde_cbor = "0.11"
 md5 = "0.8"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
+tokio-util = "0.7"
 rustls = { version = "0.23", features = ["aws-lc-rs"], default-features = false }
 async-stream = "0.3"
 clap = { version = "4", features = ["derive"] }

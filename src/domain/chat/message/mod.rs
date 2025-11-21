@@ -10,7 +10,7 @@ pub mod message_processing;
 
 /// Core message types
 pub mod types {
-    use std::fmt;
+    use std::fmt::{self, Write};
 
     use cyrup_sugars::prelude::MessageChunk;
     use serde::{Deserialize, Serialize};
@@ -223,6 +223,13 @@ pub mod types {
             input: String,
         },
 
+        /// Progress notification from tool execution
+        ProgressNotification {
+            progress: f64,
+            total: Option<f64>,
+            message: Option<String>,
+        },
+
         /// Completion finished with final information
         Complete {
             text: String,
@@ -270,6 +277,22 @@ pub mod types {
                         output.push_str(" (");
                         output.push_str(usage_info);
                         output.push(')');
+                    }
+                    write!(f, "{output}")
+                }
+                CandleMessageChunk::ProgressNotification {
+                    progress,
+                    total,
+                    message,
+                } => {
+                    let mut output = String::from("📊 ");
+                    if let Some(total_val) = total {
+                        write!(output, "[{progress}/{total_val}] ").ok();
+                    } else {
+                        write!(output, "[{progress}] ").ok();
+                    }
+                    if let Some(msg) = message {
+                        output.push_str(msg);
                     }
                     write!(f, "{output}")
                 }

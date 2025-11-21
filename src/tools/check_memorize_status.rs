@@ -1,6 +1,6 @@
 //! Check Memorize Status Tool - Monitor async memorize operations
 
-use kodegen_mcp_tool::{Tool, error::McpError};
+use kodegen_mcp_tool::{Tool, ToolExecutionContext, error::McpError};
 use kodegen_mcp_schema::claude_agent::{CheckMemorizeStatusArgs, CheckMemorizeStatusPromptArgs, MEMORY_CHECK_MEMORIZE_STATUS};
 use rmcp::model::{PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole, Content};
 use serde_json::json;
@@ -51,7 +51,7 @@ impl Tool for CheckMemorizeStatusTool {
         true
     }
 
-    async fn execute(&self, args: Self::Args) -> Result<Vec<Content>, McpError> {
+    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<Vec<Content>, McpError> {
         let response = self
             .manager
             .get_status(&args.session_id)

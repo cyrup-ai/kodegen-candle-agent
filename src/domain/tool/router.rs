@@ -78,6 +78,7 @@ trait ToolExecutor: Send + Sync {
     fn execute(
         &self,
         args: Value,
+        ctx: kodegen_mcp_tool::ToolExecutionContext,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<Content>, RouterError>> + Send>>;
 }
 
@@ -112,12 +113,14 @@ impl<T: kodegen_mcp_tool::Tool> ToolExecutor for ToolWrapper<T> {
                     .open_world(T::open_world()),
             ),
             icons: None,
+            meta: None,
         }
     }
 
     fn execute(
         &self,
         args: Value,
+        ctx: kodegen_mcp_tool::ToolExecutionContext,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<Content>, RouterError>> + Send>> {
         // Deserialize args to tool's Args type
         let typed_args: Result<T::Args, _> = serde_json::from_value(args);
@@ -126,7 +129,7 @@ impl<T: kodegen_mcp_tool::Tool> ToolExecutor for ToolWrapper<T> {
             Ok(args) => {
                 let tool = Arc::clone(&self.tool);
                 Box::pin(async move {
-                    tool.execute(args)
+                    tool.execute(args, ctx)
                         .await
                         .map_err(|e| RouterError::ToolError(e.to_string()))
                 })
@@ -214,11 +217,21 @@ impl CandleToolRouter {
     ///
     /// # Errors
     /// Returns error if tool not found, execution fails, or invalid arguments provided
-    pub async fn call_tool(&self, name: &str, args: Value) -> Result<Value, RouterError> {
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        args: Value,
+        ctx: Option<kodegen_mcp_tool::ToolExecutionContext>,
+    ) -> Result<Value, RouterError> {
         // Try local tools first
         let executor = self.local_tools.read().get(name).cloned();
         if let Some(executor) = executor {
-            let contents = executor.execute(args).await?;
+            let ctx = ctx.ok_or_else(|| {
+                RouterError::ExecutionFailed(
+                    "ToolExecutionContext required for local tools".to_string()
+                )
+            })?;
+            let contents = executor.execute(args, ctx).await?;
             return Self::contents_to_value(&contents);
         }
 
@@ -257,13 +270,14 @@ impl CandleToolRouter {
         &self,
         tool_name: &str,
         args: Value,
+        ctx: Option<kodegen_mcp_tool::ToolExecutionContext>,
     ) -> Pin<Box<dyn Stream<Item = CandleJsonChunk> + Send>> {
         let router = self.clone();
         let tool_name = tool_name.to_string();
 
         Box::pin(crate::async_stream::spawn_stream(move |tx| async move {
             tokio::spawn(async move {
-                match router.call_tool(&tool_name, args).await {
+                match router.call_tool(&tool_name, args, ctx).await {
                     Ok(result) => {
                         let _ = tx.send(CandleJsonChunk(result));
                     }
@@ -333,6 +347,7 @@ impl CandleToolRouter {
                 output_schema: None,
                 annotations: None,
                 icons: None,
+                meta: None,
             })
             .collect()
     }

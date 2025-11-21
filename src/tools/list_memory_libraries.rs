@@ -1,6 +1,6 @@
 //! List Memory Libraries Tool - List all unique library names
 
-use kodegen_mcp_tool::{Tool, error::McpError};
+use kodegen_mcp_tool::{Tool, ToolExecutionContext, error::McpError};
 use kodegen_mcp_schema::claude_agent::{ListMemoryLibrariesArgs, ListMemoryLibrariesPromptArgs, MEMORY_LIST_LIBRARIES};
 use rmcp::model::{PromptArgument, PromptMessage, Content};
 use serde_json::json;
@@ -37,7 +37,7 @@ impl Tool for ListMemoryLibrariesTool {
         true
     }
 
-    async fn execute(&self, _args: Self::Args) -> Result<Vec<Content>, McpError> {
+    async fn execute(&self, _args: Self::Args, _ctx: ToolExecutionContext) -> Result<Vec<Content>, McpError> {
         // Use pool's list_libraries() which scans filesystem
         let libraries = self.pool.list_libraries()
             .await
