@@ -187,10 +187,9 @@ impl MemoryCoordinator {
             return Err(Error::InvalidInput("Library name cannot be empty".into()));
         }
 
-        // Construct path: $XDG_CONFIG_HOME/kodegen/memory/{library}.db
-        let db_path = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("kodegen")
+        // Construct path: kodegen data dir + memory/{library}.db
+        let db_path = kodegen_config::KodegenConfig::data_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
             .join("memory")
             .join(format!("{}.db", library_name));
 

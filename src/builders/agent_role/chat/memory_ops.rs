@@ -8,9 +8,9 @@ use surrealdb::engine::any::connect;
 pub(super) async fn initialize_memory_coordinator(
     emb_model: &TextEmbeddingModel,
 ) -> Result<Arc<MemoryCoordinator>, String> {
-    let db_path = dirs::cache_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("cyrup")
+    let db_path = kodegen_config::KodegenConfig::data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("candle-agent")
         .join("agent.db");
 
     // Ensure database directory exists

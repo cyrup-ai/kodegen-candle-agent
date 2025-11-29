@@ -1,6 +1,6 @@
 [package]
 name = "kodegen_candle_agent"
-version = "0.3.4"
+version = "0.3.5"
 edition = "2024"
 description = "KODEGEN.ᴀɪ: Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
 authors = ["KODEGEN.ᴀɪ"]
@@ -37,6 +37,7 @@ kodegen_mcp_schema = { version = "0.3" }
 kodegen_server_http = { version = "0.3" }
 kodegen_mcp_client = { version = "0.3" }
 kodegen_tools_git = { version = "0.3" }
+kodegen_config = { version = "0.1" }
 kodegen_config_manager = { version = "0.3" }
 kodegen_utils = { version = "0.3" }
 cylo = { version = "0.3" }

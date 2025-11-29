@@ -150,9 +150,8 @@ impl CoordinatorPool {
     /// ```
     pub async fn list_libraries(&self) -> Result<Vec<String>> {
         // Construct memory directory path
-        let memory_dir = dirs::config_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("kodegen")
+        let memory_dir = kodegen_config::KodegenConfig::data_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .join("memory");
 
         // If directory doesn't exist, no libraries available

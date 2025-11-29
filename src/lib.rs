@@ -232,6 +232,7 @@ pub async fn start_server(
         config,
         router_set.managers,
         session_manager,
+        router_set.connection_cleanup,
     );
 
     // Start server with TLS

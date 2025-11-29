@@ -49,8 +49,8 @@ impl CliConfig {
 
     /// Get default config file path
     pub fn default_path() -> PathBuf {
-        if let Some(config_dir) = dirs::config_dir() {
-            let app_config = config_dir.join("cyrup");
+        if let Ok(config_dir) = kodegen_config::KodegenConfig::user_config_dir() {
+            let app_config = config_dir.join("candle-agent");
             fs::create_dir_all(&app_config).ok();
             app_config.join("candle-chat.json")
         } else {
