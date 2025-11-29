@@ -32,9 +32,9 @@ pub fn create_router(memory_manager: Arc<SurrealMemoryManager>) -> Router {
     Router::new()
         // Memory operations
         .route("/memories", post(create_memory))
-        .route("/memories/:id", get(get_memory))
-        .route("/memories/:id", put(update_memory))
-        .route("/memories/:id", delete(delete_memory))
+        .route("/memories/{id}", get(get_memory))
+        .route("/memories/{id}", put(update_memory))
+        .route("/memories/{id}", delete(delete_memory))
         .route("/memories/search", post(search_memories))
         // Health and monitoring
         .route("/health", get(get_health))
