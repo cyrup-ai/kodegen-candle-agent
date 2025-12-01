@@ -33,7 +33,7 @@ A high-performance [Model Context Protocol (MCP)](https://modelcontextprotocol.i
   - Metal (Apple Silicon)
   - MKL (Intel CPUs)
 
-### Installation
+### Installation 
 
 ```bash
 # Clone the repository
