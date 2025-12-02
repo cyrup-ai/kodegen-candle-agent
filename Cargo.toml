@@ -1,6 +1,6 @@
 [package]
 name = "kodegen_candle_agent"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2024"
 description = "KODEGEN.ᴀɪ: Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
 authors = ["KODEGEN.ᴀɪ"]
@@ -46,7 +46,7 @@ bitflags = { version = "2", features = ["serde"] }
 ctrlc = { version = "3", features = ["termination"] }
 
 # Workspace MCP infrastructure
-rmcp = { version = "0.9", features = ["client", "schemars", "server", "transport-child-process", "transport-io", "transport-sse-client", "transport-sse-client-reqwest", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "0.10", features = ["client", "schemars", "server", "transport-child-process", "transport-io", "transport-sse-client", "transport-sse-client-reqwest", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
 
 # Keep simd-json for potential other performance needs (not for MCP types)
 simd-json = { version = "0.17", default-features = false, features = ["known-key", "runtime-detection", "swar-number-parsing", "value-no-dup-keys"] }
@@ -180,7 +180,21 @@ console_error_panic_hook = { version = "0.1", optional = true }
 jwalk = "0.8"
 flume = "0.11"
 rayon = { version = "1", optional = true }
-gix = "0.74"
+gix = { version = "0.75", default-features = false, features = [
+    "blob-diff",
+    "blocking-network-client",
+    "blocking-http-transport-reqwest-rust-tls",
+    "max-performance",
+    "credentials",
+    "dirwalk",
+    "revision",
+    "index",
+    "blob-diff",
+    "worktree-mutation",
+    "merge",
+    "excludes",
+    "status",
+] }
 # Explicit dependencies to fix Docker build transitive dependency resolution
 gix-lock = "19"
 gix-tempfile = "19"
