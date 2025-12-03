@@ -1,9 +1,8 @@
 //! List Memory Libraries Tool - List all unique library names
 
-use kodegen_mcp_tool::{Tool, ToolExecutionContext, error::McpError};
-use kodegen_mcp_schema::claude_agent::{ListMemoryLibrariesArgs, ListMemoryLibrariesPromptArgs, MEMORY_LIST_LIBRARIES};
-use rmcp::model::{PromptArgument, PromptMessage, Content};
-use serde_json::json;
+use kodegen_mcp_tool::{Tool, ToolExecutionContext, ToolResponse, error::McpError};
+use kodegen_mcp_schema::claude_agent::{ListMemoryLibrariesArgs, ListMemoryLibrariesOutput, ListMemoryLibrariesPromptArgs, MEMORY_LIST_LIBRARIES};
+use rmcp::model::{PromptArgument, PromptMessage};
 use std::sync::Arc;
 
 use crate::memory::core::manager::pool::CoordinatorPool;
@@ -37,15 +36,13 @@ impl Tool for ListMemoryLibrariesTool {
         true
     }
 
-    async fn execute(&self, _args: Self::Args, _ctx: ToolExecutionContext) -> Result<Vec<Content>, McpError> {
+    async fn execute(&self, _args: Self::Args, _ctx: ToolExecutionContext) -> Result<ToolResponse<<Self::Args as kodegen_mcp_tool::ToolArgs>::Output>, McpError> {
         // Use pool's list_libraries() which scans filesystem
         let libraries = self.pool.list_libraries()
             .await
             .map_err(|e| McpError::Other(anyhow::anyhow!("Failed to list libraries: {}", e)))?;
 
         let count = libraries.len();
-
-        let mut contents = Vec::new();
 
         // Terminal summary
         let summary = if libraries.is_empty() {
@@ -62,18 +59,11 @@ impl Tool for ListMemoryLibrariesTool {
                 count, library_list
             )
         };
-        contents.push(Content::text(summary));
 
-        // JSON metadata
-        let metadata = json!({
-            "libraries": libraries,
-            "count": count
-        });
-        let json_str = serde_json::to_string_pretty(&metadata)
-            .unwrap_or_else(|_| "{}".to_string());
-        contents.push(Content::text(json_str));
-
-        Ok(contents)
+        Ok(ToolResponse::new(summary, ListMemoryLibrariesOutput {
+            libraries,
+            count,
+        }))
     }
 
     fn prompt_arguments() -> Vec<PromptArgument> {

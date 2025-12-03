@@ -1,9 +1,8 @@
 //! Recall Tool - Retrieve relevant memories from a library using semantic search
 
-use kodegen_mcp_tool::{Tool, ToolExecutionContext, error::McpError};
-use kodegen_mcp_schema::claude_agent::{RecallArgs, RecallPromptArgs, MEMORY_RECALL};
-use rmcp::model::{PromptArgument, PromptMessage, Content};
-use serde_json::{json, Value};
+use kodegen_mcp_tool::{Tool, ToolExecutionContext, ToolResponse, error::McpError};
+use kodegen_mcp_schema::claude_agent::{RecallArgs, RecallOutput, RecalledMemory, RecallPromptArgs, MEMORY_RECALL};
+use rmcp::model::{PromptArgument, PromptMessage};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -39,7 +38,7 @@ impl Tool for RecallTool {
         true
     }
 
-    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<Vec<Content>, McpError> {
+    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<ToolResponse<<Self::Args as kodegen_mcp_tool::ToolArgs>::Output>, McpError> {
         let start = Instant::now();
 
         // Get coordinator for specified library
@@ -56,8 +55,8 @@ impl Tool for RecallTool {
             .await
             .map_err(|e| McpError::Other(anyhow::anyhow!("Search failed: {}", e)))?;
 
-        // Convert to simplified format with 4 core fields: similarity, importance, score, rank
-        let memories: Vec<Value> = results
+        // Convert to typed RecalledMemory structs
+        let memories: Vec<RecalledMemory> = results
             .into_iter()
             .enumerate()
             .map(|(index, memory)| {
@@ -76,22 +75,20 @@ impl Tool for RecallTool {
                 // Rank is 1-indexed position in already-sorted results
                 let rank = index + 1;
 
-                json!({
-                    "id": memory.id(),
-                    "content": memory.content().to_string(),
-                    "created_at": memory.creation_time(),
-                    "similarity": similarity,
-                    "importance": importance,
-                    "score": score,
-                    "rank": rank
-                })
+                RecalledMemory {
+                    id: memory.id().to_string(),
+                    content: memory.content().to_string(),
+                    created_at: memory.creation_time().to_string(),
+                    similarity,
+                    importance,
+                    score,
+                    rank,
+                }
             })
             .collect();
 
         let count = memories.len();
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-        let mut contents = Vec::new();
 
         // Terminal summary
         let summary = if memories.is_empty() {
@@ -107,19 +104,13 @@ impl Tool for RecallTool {
                 .take(5)
                 .enumerate()
                 .map(|(i, m)| {
-                    let similarity = m.get("similarity")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.0);
-                    let content = m.get("content")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
                     // Truncate content to 50 chars
-                    let truncated = if content.len() > 50 {
-                        format!("{}...", &content[..50])
+                    let truncated = if m.content.len() > 50 {
+                        format!("{}...", &m.content[..50])
                     } else {
-                        content.to_string()
+                        m.content.clone()
                     };
-                    format!("  {}. [{:.2}] {}", i + 1, similarity, truncated)
+                    format!("  {}. [{:.2}] {}", i + 1, m.similarity, truncated)
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -132,20 +123,13 @@ impl Tool for RecallTool {
                 count, args.library, elapsed_ms, top_results
             )
         };
-        contents.push(Content::text(summary));
 
-        // JSON metadata
-        let metadata = json!({
-            "memories": memories,
-            "library": args.library,
-            "count": count,
-            "elapsed_ms": elapsed_ms
-        });
-        let json_str = serde_json::to_string_pretty(&metadata)
-            .unwrap_or_else(|_| "{}".to_string());
-        contents.push(Content::text(json_str));
-
-        Ok(contents)
+        Ok(ToolResponse::new(summary, RecallOutput {
+            memories,
+            library: args.library,
+            count,
+            elapsed_ms,
+        }))
     }
 
     fn prompt_arguments() -> Vec<PromptArgument> {

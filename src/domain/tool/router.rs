@@ -15,6 +15,7 @@ use tokio_stream::Stream;
 use crate::domain::context::chunks::CandleJsonChunk;
 use cylo::{BackendConfig, Cylo, ExecutionRequest, ExecutionResult, create_backend};
 use kodegen_mcp_client::KodegenClient;
+use kodegen_mcp_tool::ToolResponse;
 use rmcp::model::{Tool as RmcpTool, Content};
 
 /// Candle Tool Router
@@ -104,7 +105,7 @@ impl<T: kodegen_mcp_tool::Tool> ToolExecutor for ToolWrapper<T> {
             title: None,
             description: Some(Cow::Borrowed(T::description())),
             input_schema: T::input_schema(),
-            output_schema: T::output_schema(),
+            output_schema: Some(T::output_schema()),
             annotations: Some(
                 ToolAnnotations::new()
                     .read_only(T::read_only())
@@ -129,9 +130,17 @@ impl<T: kodegen_mcp_tool::Tool> ToolExecutor for ToolWrapper<T> {
             Ok(args) => {
                 let tool = Arc::clone(&self.tool);
                 Box::pin(async move {
-                    tool.execute(args, ctx)
+                    let response: ToolResponse<<T::Args as kodegen_mcp_tool::ToolArgs>::Output> = tool.execute(args, ctx)
                         .await
-                        .map_err(|e| RouterError::ToolError(e.to_string()))
+                        .map_err(|e| RouterError::ToolError(e.to_string()))?;
+                    
+                    // Convert ToolResponse to Vec<Content>
+                    let json_str = serde_json::to_string_pretty(&response.metadata)
+                        .unwrap_or_else(|_| "{}".to_string());
+                    Ok(vec![
+                        Content::text(response.display),
+                        Content::text(json_str),
+                    ])
                 })
             }
             Err(e) => Box::pin(async move {

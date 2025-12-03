@@ -1,9 +1,8 @@
 //! Memorize Tool - Store content in a named memory library (async session-based)
 
-use kodegen_mcp_tool::{Tool, ToolExecutionContext, error::McpError};
-use kodegen_mcp_schema::claude_agent::{MemorizeArgs, MemorizePromptArgs, MEMORY_MEMORIZE};
-use rmcp::model::{PromptArgument, PromptMessage, Content};
-use serde_json::json;
+use kodegen_mcp_tool::{Tool, ToolExecutionContext, ToolResponse, error::McpError};
+use kodegen_mcp_schema::claude_agent::{MemorizeArgs, MemorizeOutput, MemorizePromptArgs, MEMORY_MEMORIZE};
+use rmcp::model::{PromptArgument, PromptMessage};
 use std::sync::Arc;
 
 use super::memorize_manager::MemorizeSessionManager;
@@ -46,15 +45,13 @@ impl Tool for MemorizeTool {
         false // Creates new memories each time
     }
 
-    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<Vec<Content>, McpError> {
+    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<ToolResponse<<Self::Args as kodegen_mcp_tool::ToolArgs>::Output>, McpError> {
         // Start async memorize session (returns immediately)
         let session_id = self
             .manager
             .start_memorize_session(args.library.clone(), args.content.clone())
             .await
             .map_err(|e| McpError::Other(anyhow::anyhow!("Failed to start memorize session: {}", e)))?;
-
-        let mut contents = Vec::new();
 
         let summary = format!(
             "✓ Memorization started\n\n\
@@ -64,19 +61,13 @@ impl Tool for MemorizeTool {
              Use check_memorize_status to monitor progress",
             session_id, args.library
         );
-        contents.push(Content::text(summary));
 
-        let metadata = json!({
-            "session_id": session_id,
-            "status": "IN_PROGRESS",
-            "library": args.library,
-            "message": "Memorization started in background. Use check_memorize_status to monitor progress."
-        });
-        let json_str = serde_json::to_string_pretty(&metadata)
-            .unwrap_or_else(|_| "{}".to_string());
-        contents.push(Content::text(json_str));
-
-        Ok(contents)
+        Ok(ToolResponse::new(summary, MemorizeOutput {
+            session_id,
+            status: "IN_PROGRESS".to_string(),
+            library: args.library,
+            message: "Memorization started in background. Use check_memorize_status to monitor progress.".to_string(),
+        }))
     }
 
     fn prompt_arguments() -> Vec<PromptArgument> {

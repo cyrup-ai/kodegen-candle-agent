@@ -25,7 +25,7 @@ pub struct ToolSelectionResponse {
     pub reasoning: String,
 }
 
-/// Tool selection agent - filters 75 tools down to 2-3 most relevant
+/// Tool selection agent - filters 100+ tools down to 2-3 most relevant
 ///
 /// This agent uses Qwen3-0.5B with structured generation to intelligently
 /// select the most relevant tools for a user query, reducing token usage
