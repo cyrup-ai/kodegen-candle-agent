@@ -9,6 +9,7 @@ use tokio_stream::Stream;
 use super::{
     CommandExecutionContext, CommandExecutionResult, CommandInfo, ImmutableChatCommand,
     ValidationResult,
+    command_results::{SearchResult, SessionResult},
     executor_defs::{
         DomainBranchExecutor, DomainMacroExecutor, DomainSearchExecutor, DomainSessionExecutor,
         DomainTemplateExecutor,
@@ -112,11 +113,11 @@ impl DomainCommandExecutor for DomainSessionExecutor {
         _context: &CommandExecutionContext,
     ) -> Pin<Box<dyn Stream<Item = CommandExecutionResult> + Send>> {
         Box::pin(crate::async_stream::spawn_stream(|sender| async move {
-            let result = CommandExecutionResult::Data(serde_json::json!({
-                "session_type": "domain",
-                "status": "active",
-                "session_id": uuid::Uuid::new_v4().to_string()
-            }));
+            let result = CommandExecutionResult::Session(SessionResult {
+                session_type: "domain".to_string(),
+                status: "active".to_string(),
+                session_id: uuid::Uuid::new_v4().to_string(),
+            });
             let _ = sender.send(result);
         }))
     }
@@ -144,12 +145,12 @@ impl DomainCommandExecutor for DomainSearchExecutor {
         _context: &CommandExecutionContext,
     ) -> Pin<Box<dyn Stream<Item = CommandExecutionResult> + Send>> {
         Box::pin(crate::async_stream::spawn_stream(|sender| async move {
-            let result = CommandExecutionResult::Data(serde_json::json!({
-                "search_type": "domain",
-                "results": [],
-                "total_count": 0,
-                "status": "success"
-            }));
+            let result = CommandExecutionResult::Search(SearchResult {
+                search_type: "domain".to_string(),
+                results: Vec::new(),
+                total_count: 0,
+                status: "success".to_string(),
+            });
             let _ = sender.send(result);
         }))
     }

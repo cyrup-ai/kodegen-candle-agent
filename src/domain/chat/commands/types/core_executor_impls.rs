@@ -9,6 +9,7 @@ use tokio_stream::Stream;
 use super::{
     CommandExecutionContext, CommandExecutionResult, CommandInfo, ImmutableChatCommand,
     ValidationResult,
+    command_results::{DebugInfo, DebugResult, DomainStats, StatsResult},
     executor_defs::{
         DomainChatExecutor, DomainClearExecutor, DomainDebugExecutor, DomainHelpExecutor,
         DomainStatsExecutor, DomainThemeExecutor,
@@ -88,17 +89,17 @@ impl DomainCommandExecutor for DomainDebugExecutor {
         _context: &CommandExecutionContext,
     ) -> Pin<Box<dyn Stream<Item = CommandExecutionResult> + Send>> {
         Box::pin(crate::async_stream::spawn_stream(|sender| async move {
-            let result = CommandExecutionResult::Data(serde_json::json!({
-                "debug_info": {
-                    "enabled": true,
-                    "level": "info",
-                    "timestamp": std::time::SystemTime::now()
+            let result = CommandExecutionResult::Debug(DebugResult {
+                debug_info: DebugInfo {
+                    enabled: true,
+                    level: "info".to_string(),
+                    timestamp: std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs())
-                        .unwrap_or(0)
+                        .unwrap_or(0),
                 },
-                "status": "success"
-            }));
+                status: "success".to_string(),
+            });
             let _ = sender.send(result);
         }))
     }
@@ -126,15 +127,15 @@ impl DomainCommandExecutor for DomainStatsExecutor {
         _context: &CommandExecutionContext,
     ) -> Pin<Box<dyn Stream<Item = CommandExecutionResult> + Send>> {
         Box::pin(crate::async_stream::spawn_stream(|sender| async move {
-            let result = CommandExecutionResult::Data(serde_json::json!({
-                "domain_stats": {
-                    "total_commands": 0,
-                    "successful_executions": 0,
-                    "failed_executions": 0,
-                    "average_execution_time_ms": 0.0
+            let result = CommandExecutionResult::Stats(StatsResult {
+                domain_stats: DomainStats {
+                    total_commands: 0,
+                    successful_executions: 0,
+                    failed_executions: 0,
+                    average_execution_time_ms: 0.0,
                 },
-                "status": "success"
-            }));
+                status: "success".to_string(),
+            });
             let _ = sender.send(result);
         }))
     }

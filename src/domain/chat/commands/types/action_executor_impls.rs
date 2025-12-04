@@ -9,6 +9,7 @@ use tokio_stream::Stream;
 use super::{
     CommandExecutionContext, CommandExecutionResult, CommandInfo, ImmutableChatCommand,
     ValidationResult,
+    command_results::HistoryResult,
     executor_defs::{
         DomainCopyExecutor, DomainCustomExecutor, DomainHistoryExecutor, DomainRetryExecutor,
         DomainToolExecutor, DomainUndoExecutor,
@@ -142,11 +143,11 @@ impl DomainCommandExecutor for DomainHistoryExecutor {
         _context: &CommandExecutionContext,
     ) -> Pin<Box<dyn Stream<Item = CommandExecutionResult> + Send>> {
         Box::pin(crate::async_stream::spawn_stream(|sender| async move {
-            let result = CommandExecutionResult::Data(serde_json::json!({
-                "history": [],
-                "total_entries": 0,
-                "status": "success"
-            }));
+            let result = CommandExecutionResult::History(HistoryResult {
+                history: Vec::new(),
+                total_entries: 0,
+                status: "success".to_string(),
+            });
             let _ = sender.send(result);
         }))
     }

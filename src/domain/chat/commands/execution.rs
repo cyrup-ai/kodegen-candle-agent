@@ -13,6 +13,7 @@ use tokio_stream::Stream;
 use super::parsing::CommandParser;
 use super::types::actions::SearchScope;
 use super::types::commands::{CommandExecutionResult, ImmutableChatCommand, OutputType};
+use super::types::command_results::QuerySearchResult;
 use super::types::events::CommandEvent;
 use super::types::metadata::ResourceUsage;
 use crate::domain::chat::export::{ChatExporter, ExportConfig, ExportData, ExportFormat};
@@ -974,12 +975,12 @@ impl CommandExecutor {
                     ));
 
                     // Emit completion event with search results
-                    let result = CommandExecutionResult::Data(serde_json::json!({
-                        "query": query,
-                        "scope": format!("{:?}", scope),
-                        "results": [],
-                        "total_found": 0
-                    }));
+                    let result = CommandExecutionResult::QuerySearch(QuerySearchResult {
+                        query: query.clone(),
+                        scope: format!("{scope:?}"),
+                        results: Vec::new(),
+                        total_found: 0,
+                    });
                     #[allow(clippy::cast_possible_truncation)]
                     let duration_us =
                         start_time.elapsed().as_micros().min(u128::from(u64::MAX)) as u64;

@@ -9,6 +9,7 @@ use tokio_stream::Stream;
 use super::{
     CommandExecutionContext, CommandExecutionResult, CommandInfo, ImmutableChatCommand,
     ValidationResult,
+    command_results::{ExportResult, SettingsResult},
     executor_defs::{
         DomainConfigExecutor, DomainExportExecutor, DomainImportExecutor, DomainLoadExecutor,
         DomainSaveExecutor, DomainSettingsExecutor,
@@ -24,14 +25,14 @@ impl DomainCommandExecutor for DomainExportExecutor {
     ) -> Pin<Box<dyn Stream<Item = CommandExecutionResult> + Send>> {
         Box::pin(crate::async_stream::spawn_stream(|sender| async move {
             // Export domain data with zero-allocation streaming pattern
-            let result = CommandExecutionResult::Data(serde_json::json!({
-                "export_type": "domain",
-                "status": "success",
-                "timestamp": std::time::SystemTime::now()
+            let result = CommandExecutionResult::Export(ExportResult {
+                export_type: "domain".to_string(),
+                status: "success".to_string(),
+                timestamp: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
-                    .unwrap_or(0)
-            }));
+                    .unwrap_or(0),
+            });
             let _ = sender.send(result);
         }))
     }
@@ -176,11 +177,11 @@ impl DomainCommandExecutor for DomainSettingsExecutor {
         _context: &CommandExecutionContext,
     ) -> Pin<Box<dyn Stream<Item = CommandExecutionResult> + Send>> {
         Box::pin(crate::async_stream::spawn_stream(|sender| async move {
-            let result = CommandExecutionResult::Data(serde_json::json!({
-                "settings": {},
-                "updated": true,
-                "status": "success"
-            }));
+            let result = CommandExecutionResult::Settings(SettingsResult {
+                settings: serde_json::Map::new(),
+                updated: true,
+                status: "success".to_string(),
+            });
             let _ = sender.send(result);
         }))
     }
