@@ -102,7 +102,7 @@ pub mod prelude {
 
     // Re-export workspace MCP types for convenience
     pub use kodegen_mcp_client::KodegenClient;
-    pub use kodegen_mcp_tool::Tool;
+    pub use kodegen_mcp_schema::Tool;
     pub use rmcp::model::Tool as ToolInfo;
 
     // Real workflow execution types - streams-only architecture
@@ -173,7 +173,7 @@ pub async fn start_server(
         format!("candle-agent-{}", instance_id)
     );
 
-    kodegen_mcp_tool::tool_history::init_global_history(instance_id.clone()).await;
+    kodegen_mcp_schema::tool::tool_history::init_global_history(instance_id.clone()).await;
 
     let mut tool_router = ToolRouter::new();
     let mut prompt_router = PromptRouter::new();
@@ -282,7 +282,7 @@ pub async fn start_server_with_listener(
         format!("candle-agent-{}", instance_id)
     );
 
-    kodegen_mcp_tool::tool_history::init_global_history(instance_id.clone()).await;
+    kodegen_mcp_schema::tool::tool_history::init_global_history(instance_id.clone()).await;
 
     let mut tool_router = ToolRouter::new();
     let mut prompt_router = PromptRouter::new();

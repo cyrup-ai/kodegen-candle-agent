@@ -1,8 +1,8 @@
 //! List Memory Libraries Tool - List all unique library names
 
-use kodegen_mcp_tool::{Tool, ToolExecutionContext, ToolResponse, error::McpError};
-use kodegen_mcp_schema::claude_agent::{ListMemoryLibrariesArgs, ListMemoryLibrariesOutput, ListMemoryLibrariesPromptArgs, MEMORY_LIST_LIBRARIES};
-use rmcp::model::{PromptArgument, PromptMessage};
+use kodegen_mcp_schema::{Tool, ToolExecutionContext, ToolResponse, McpError};
+use kodegen_mcp_schema::memory::{ListMemoryLibrariesArgs, ListMemoryLibrariesOutput, MEMORY_LIST_LIBRARIES};
+use kodegen_mcp_schema::memory::list_libraries::MemoryListLibrariesPrompts;
 use std::sync::Arc;
 
 use crate::memory::core::manager::pool::CoordinatorPool;
@@ -20,7 +20,7 @@ impl ListMemoryLibrariesTool {
 
 impl Tool for ListMemoryLibrariesTool {
     type Args = ListMemoryLibrariesArgs;
-    type PromptArgs = ListMemoryLibrariesPromptArgs;
+    type Prompts = MemoryListLibrariesPrompts;
 
     fn name() -> &'static str {
         MEMORY_LIST_LIBRARIES
@@ -36,7 +36,7 @@ impl Tool for ListMemoryLibrariesTool {
         true
     }
 
-    async fn execute(&self, _args: Self::Args, _ctx: ToolExecutionContext) -> Result<ToolResponse<<Self::Args as kodegen_mcp_tool::ToolArgs>::Output>, McpError> {
+    async fn execute(&self, _args: Self::Args, _ctx: ToolExecutionContext) -> Result<ToolResponse<<Self::Args as kodegen_mcp_schema::ToolArgs>::Output>, McpError> {
         // Use pool's list_libraries() which scans filesystem
         let libraries = self.pool.list_libraries()
             .await
@@ -66,52 +66,4 @@ impl Tool for ListMemoryLibrariesTool {
         }))
     }
 
-    fn prompt_arguments() -> Vec<PromptArgument> {
-        vec![]
-    }
-
-    async fn prompt(&self, _args: Self::PromptArgs) -> Result<Vec<PromptMessage>, McpError> {
-        use rmcp::model::{PromptMessageRole, PromptMessageContent};
-
-        Ok(vec![
-            PromptMessage {
-                role: PromptMessageRole::User,
-                content: PromptMessageContent::text(
-                    "How do I use list_memory_libraries to see what knowledge is available?",
-                ),
-            },
-            PromptMessage {
-                role: PromptMessageRole::Assistant,
-                content: PromptMessageContent::text(
-                    "The list_memory_libraries tool shows all library database files that exist on disk. \
-                     It scans the memory directory for .db files, NOT database contents.\n\n\
-                     Basic usage:\n\
-                     list_memory_libraries({})\n\n\
-                     No parameters required - returns all libraries found on filesystem.\n\n\
-                     Response format:\n\
-                     {\n\
-                       \"libraries\": [\n\
-                         \"personal\",\n\
-                         \"project_x\",\n\
-                         \"work\"\n\
-                       ],\n\
-                       \"count\": 3\n\
-                     }\n\n\
-                     Libraries are database files at: $XDG_CONFIG_HOME/kodegen/memory/{library}.db\n\
-                     Results are sorted alphabetically.\n\n\
-                     When to use:\n\
-                     - Discovery: \"What libraries exist?\"\n\
-                     - Before recall: Check which libraries are available\n\
-                     - User asks: \"What memory libraries do I have?\"\n\n\
-                     Empty response:\n\
-                     If no libraries exist yet, you'll get:\n\
-                     {\n\
-                       \"libraries\": [],\n\
-                       \"count\": 0\n\
-                     }\n\n\
-                     Libraries are created automatically when you first memorize() with a new library name.",
-                ),
-            },
-        ])
-    }
 }

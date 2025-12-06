@@ -19,5 +19,5 @@ pub use selector::*;
 
 // Re-export workspace MCP types
 pub use kodegen_mcp_client::KodegenClient;
-pub use kodegen_mcp_tool::Tool;
+pub use kodegen_mcp_schema::Tool;
 pub use rmcp::model::Tool as ToolInfo; // Type alias for backwards compatibility

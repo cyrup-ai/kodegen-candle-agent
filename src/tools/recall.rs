@@ -1,8 +1,7 @@
 //! Recall Tool - Retrieve relevant memories from a library using semantic search
 
-use kodegen_mcp_tool::{Tool, ToolExecutionContext, ToolResponse, error::McpError};
-use kodegen_mcp_schema::claude_agent::{RecallArgs, RecallOutput, RecalledMemory, RecallPromptArgs, MEMORY_RECALL};
-use rmcp::model::{PromptArgument, PromptMessage};
+use kodegen_mcp_schema::{Tool, ToolExecutionContext, ToolResponse, McpError};
+use kodegen_mcp_schema::memory::{RecallArgs, RecallOutput, RecalledMemory, MEMORY_RECALL, MemoryRecallPrompts};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -22,7 +21,7 @@ impl RecallTool {
 
 impl Tool for RecallTool {
     type Args = RecallArgs;
-    type PromptArgs = RecallPromptArgs;
+    type Prompts = MemoryRecallPrompts;
 
     fn name() -> &'static str {
         MEMORY_RECALL
@@ -38,7 +37,7 @@ impl Tool for RecallTool {
         true
     }
 
-    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<ToolResponse<<Self::Args as kodegen_mcp_tool::ToolArgs>::Output>, McpError> {
+    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<ToolResponse<<Self::Args as kodegen_mcp_schema::ToolArgs>::Output>, McpError> {
         let start = Instant::now();
 
         // Get coordinator for specified library
@@ -132,49 +131,4 @@ impl Tool for RecallTool {
         }))
     }
 
-    fn prompt_arguments() -> Vec<PromptArgument> {
-        vec![]
-    }
-
-    async fn prompt(&self, _args: Self::PromptArgs) -> Result<Vec<PromptMessage>, McpError> {
-        use rmcp::model::{PromptMessageRole, PromptMessageContent};
-
-        Ok(vec![
-            PromptMessage {
-                role: PromptMessageRole::User,
-                content: PromptMessageContent::text(
-                    "How do I use the recall tool to retrieve relevant memories using semantic search?",
-                ),
-            },
-            PromptMessage {
-                role: PromptMessageRole::Assistant,
-                content: PromptMessageContent::text(
-                    "The recall tool retrieves memories from a specific library using semantic search. \
-                     Searches are scoped to one library (database file) at a time.\n\n\
-                     Basic usage:\n\
-                     1. Search work library: recall({\"library\": \"work\", \"context\": \"authentication\", \"limit\": 5})\n\
-                     2. Search personal library: recall({\"library\": \"personal\", \"context\": \"recipes\", \"limit\": 3})\n\
-                     3. Search project library: recall({\"library\": \"project_x\", \"context\": \"API design\", \"limit\": 10})\n\n\
-                     Library scoping:\n\
-                     - Results come ONLY from the specified library's database file\n\
-                     - Memories in other libraries are NOT searched\n\
-                     - To search multiple libraries, make multiple recall() calls\n\n\
-                     Semantic search capability:\n\
-                     - Finds conceptually similar content, not just keyword matches\n\
-                     - Uses 1024-dimensional vector embeddings\n\
-                     - Results ranked by relevance_score\n\n\
-                     Response format:\n\
-                     {\n\
-                       \"memories\": [{\"id\": \"...\", \"content\": \"...\", \"relevance_score\": 0.85}],\n\
-                       \"library\": \"work\",\n\
-                       \"count\": 3\n\
-                     }\n\n\
-                     Parameters:\n\
-                     - library: Which database file to search (required)\n\
-                     - context: Your search query (required)\n\
-                     - limit: Maximum results (optional, default: 10)",
-                ),
-            },
-        ])
-    }
 }

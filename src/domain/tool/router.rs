@@ -15,7 +15,7 @@ use tokio_stream::Stream;
 use crate::domain::context::chunks::CandleJsonChunk;
 use cylo::{BackendConfig, Cylo, ExecutionRequest, ExecutionResult, create_backend};
 use kodegen_mcp_client::KodegenClient;
-use kodegen_mcp_tool::ToolResponse;
+use kodegen_mcp_schema::ToolResponse;
 use rmcp::model::{Tool as RmcpTool, Content};
 
 /// Candle Tool Router
@@ -79,16 +79,16 @@ trait ToolExecutor: Send + Sync {
     fn execute(
         &self,
         args: Value,
-        ctx: kodegen_mcp_tool::ToolExecutionContext,
+        ctx: kodegen_mcp_schema::ToolExecutionContext,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<Content>, RouterError>> + Send>>;
 }
 
 /// Wrapper for Tool trait implementations
-struct ToolWrapper<T: kodegen_mcp_tool::Tool> {
+struct ToolWrapper<T: kodegen_mcp_schema::Tool> {
     tool: Arc<T>,
 }
 
-impl<T: kodegen_mcp_tool::Tool> ToolWrapper<T> {
+impl<T: kodegen_mcp_schema::Tool> ToolWrapper<T> {
     fn new(tool: T) -> Self {
         Self {
             tool: Arc::new(tool),
@@ -96,7 +96,7 @@ impl<T: kodegen_mcp_tool::Tool> ToolWrapper<T> {
     }
 }
 
-impl<T: kodegen_mcp_tool::Tool> ToolExecutor for ToolWrapper<T> {
+impl<T: kodegen_mcp_schema::Tool> ToolExecutor for ToolWrapper<T> {
     fn metadata(&self) -> RmcpTool {
         use rmcp::model::ToolAnnotations;
 
@@ -121,7 +121,7 @@ impl<T: kodegen_mcp_tool::Tool> ToolExecutor for ToolWrapper<T> {
     fn execute(
         &self,
         args: Value,
-        ctx: kodegen_mcp_tool::ToolExecutionContext,
+        ctx: kodegen_mcp_schema::ToolExecutionContext,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<Content>, RouterError>> + Send>> {
         // Deserialize args to tool's Args type
         let typed_args: Result<T::Args, _> = serde_json::from_value(args);
@@ -130,7 +130,7 @@ impl<T: kodegen_mcp_tool::Tool> ToolExecutor for ToolWrapper<T> {
             Ok(args) => {
                 let tool = Arc::clone(&self.tool);
                 Box::pin(async move {
-                    let response: ToolResponse<<T::Args as kodegen_mcp_tool::ToolArgs>::Output> = tool.execute(args, ctx)
+                    let response: ToolResponse<<T::Args as kodegen_mcp_schema::ToolArgs>::Output> = tool.execute(args, ctx)
                         .await
                         .map_err(|e| RouterError::ToolError(e.to_string()))?;
                     
@@ -177,7 +177,7 @@ impl CandleToolRouter {
     /// Register a local tool
     pub fn register_tool<T>(&self, tool: T)
     where
-        T: kodegen_mcp_tool::Tool + 'static,
+        T: kodegen_mcp_schema::Tool + 'static,
     {
         let name = T::name().to_string();
         let executor: Arc<dyn ToolExecutor> = Arc::new(ToolWrapper::new(tool));
@@ -230,7 +230,7 @@ impl CandleToolRouter {
         &self,
         name: &str,
         args: Value,
-        ctx: Option<kodegen_mcp_tool::ToolExecutionContext>,
+        ctx: Option<kodegen_mcp_schema::ToolExecutionContext>,
     ) -> Result<Value, RouterError> {
         // Try local tools first
         let executor = self.local_tools.read().get(name).cloned();
@@ -279,7 +279,7 @@ impl CandleToolRouter {
         &self,
         tool_name: &str,
         args: Value,
-        ctx: Option<kodegen_mcp_tool::ToolExecutionContext>,
+        ctx: Option<kodegen_mcp_schema::ToolExecutionContext>,
     ) -> Pin<Box<dyn Stream<Item = CandleJsonChunk> + Send>> {
         let router = self.clone();
         let tool_name = tool_name.to_string();
