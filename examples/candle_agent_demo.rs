@@ -3,6 +3,7 @@ mod common;
 use anyhow::Context;
 use serde_json::json;
 use tracing::info;
+use kodegen_config::{MEMORY_CHECK_MEMORIZE_STATUS, MEMORY_LIST_LIBRARIES, MEMORY_MEMORIZE, MEMORY_RECALL};
 
 #[derive(serde::Deserialize, Debug)]
 struct MemorizeResponse {
@@ -72,7 +73,7 @@ async fn wait_for_memorize_completion(
     for attempt in 1..=max_attempts {
         let status: CheckMemorizeStatusResponse = client
             .call_tool_typed(
-                "memory_check_memorize_status",
+                kodegen_config::MEMORY_CHECK_MEMORIZE_STATUS,
                 json!({ "session_id": session_id }),
             )
             .await
@@ -178,7 +179,7 @@ async fn run_memory_example(client: &common::LoggingClient) -> anyhow::Result<()
     info!("1. Storing Rust pattern #1");
     let session1: MemorizeResponse = client
         .call_tool_typed(
-            "memory_memorize",
+            kodegen_config::MEMORY_MEMORIZE,
             json!({
                 "library": "rust_patterns",
                 "content": "Error handling pattern using Result<T, E> with the ? operator for clean propagation"
@@ -193,7 +194,7 @@ async fn run_memory_example(client: &common::LoggingClient) -> anyhow::Result<()
     info!("2. Storing Rust pattern #2");
     let session2: MemorizeResponse = client
         .call_tool_typed(
-            "memory_memorize",
+            kodegen_config::MEMORY_MEMORIZE,
             json!({
                 "library": "rust_patterns",
                 "content": "Async/await pattern for file I/O operations using tokio::fs with proper error handling"
@@ -209,7 +210,7 @@ async fn run_memory_example(client: &common::LoggingClient) -> anyhow::Result<()
     info!("3. Storing debugging insight #1");
     let session3: MemorizeResponse = client
         .call_tool_typed(
-            "memory_memorize",
+            kodegen_config::MEMORY_MEMORIZE,
             json!({
                 "library": "debugging_insights",
                 "content": "React re-renders happen when props or state change - use React.memo to prevent unnecessary renders"
@@ -224,7 +225,7 @@ async fn run_memory_example(client: &common::LoggingClient) -> anyhow::Result<()
     info!("4. Storing debugging insight #2");
     let session4: MemorizeResponse = client
         .call_tool_typed(
-            "memory_memorize",
+            kodegen_config::MEMORY_MEMORIZE,
             json!({
                 "library": "debugging_insights",
                 "content": "SQL N+1 query problem - use eager loading with JOIN instead of lazy loading to reduce DB calls"
@@ -243,7 +244,7 @@ async fn run_memory_example(client: &common::LoggingClient) -> anyhow::Result<()
 
     info!("5. Calling list_memory_libraries()");
     let libraries: ListLibrariesResponse = client
-        .call_tool_typed("memory_list_libraries", json!({}))
+        .call_tool_typed(kodegen_config::MEMORY_LIST_LIBRARIES, json!({}))
         .await
         .context("Failed to list memory libraries")?;
 
@@ -260,7 +261,7 @@ async fn run_memory_example(client: &common::LoggingClient) -> anyhow::Result<()
     info!("6. Recalling from 'rust_patterns' (context: 'error handling')");
     let recall1: RecallResponse = client
         .call_tool_typed(
-            "memory_recall",
+            kodegen_config::MEMORY_RECALL,
             json!({
                 "library": "rust_patterns",
                 "context": "error handling",
@@ -282,7 +283,7 @@ async fn run_memory_example(client: &common::LoggingClient) -> anyhow::Result<()
     info!("\n7. Recalling from 'debugging_insights' (context: 'performance optimization')");
     let recall2: RecallResponse = client
         .call_tool_typed(
-            "memory_recall",
+            kodegen_config::MEMORY_RECALL,
             json!({
                 "library": "debugging_insights",
                 "context": "performance optimization",
@@ -311,7 +312,7 @@ async fn run_memory_example(client: &common::LoggingClient) -> anyhow::Result<()
     info!("8. Storing duplicate content in 'rust_patterns' (first time)");
     let dup_session1: MemorizeResponse = client
         .call_tool_typed(
-            "memory_memorize",
+            kodegen_config::MEMORY_MEMORIZE,
             json!({
                 "library": "rust_patterns",
                 "content": duplicate_content
@@ -326,7 +327,7 @@ async fn run_memory_example(client: &common::LoggingClient) -> anyhow::Result<()
     info!("9. Storing SAME content in 'rust_patterns' (second time - should deduplicate)");
     let dup_session2: MemorizeResponse = client
         .call_tool_typed(
-            "memory_memorize",
+            kodegen_config::MEMORY_MEMORIZE,
             json!({
                 "library": "rust_patterns",
                 "content": duplicate_content
@@ -351,7 +352,7 @@ async fn run_memory_example(client: &common::LoggingClient) -> anyhow::Result<()
     info!("\n10. Storing SAME content in 'debugging_insights' (different library)");
     let dup_session3: MemorizeResponse = client
         .call_tool_typed(
-            "memory_memorize",
+            kodegen_config::MEMORY_MEMORIZE,
             json!({
                 "library": "debugging_insights",
                 "content": duplicate_content

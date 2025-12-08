@@ -145,103 +145,34 @@ pub use capability::registry::pool::{Pool, PoolError, init_maintenance};
 // ============================================================================
 
 /// Start the candle-agent HTTP server programmatically for embedded mode
+///
+/// Returns a ServerHandle for graceful shutdown control.
+/// This function is non-blocking - the server runs in background tasks.
+///
+/// # Arguments
+/// * `addr` - Socket address to bind to (e.g., "127.0.0.1:30441")
+/// * `tls_cert` - Optional path to TLS certificate file
+/// * `tls_key` - Optional path to TLS private key file
+///
+/// # Returns
+/// ServerHandle for graceful shutdown, or error if startup fails
 pub async fn start_server(
     addr: std::net::SocketAddr,
     tls_cert: Option<std::path::PathBuf>,
     tls_key: Option<std::path::PathBuf>,
 ) -> anyhow::Result<kodegen_server_http::ServerHandle> {
-    use kodegen_server_http::{Managers, RouterSet, register_tool};
-    use kodegen_config_manager::ConfigManager;
-    use rmcp::handler::server::router::{prompt::PromptRouter, tool::ToolRouter};
+    // Bind to the address first
+    let listener = tokio::net::TcpListener::bind(addr).await
+        .map_err(|e| anyhow::anyhow!("Failed to bind to {}: {}", addr, e))?;
 
-    let _ = env_logger::try_init();
-
-    if rustls::crypto::ring::default_provider().install_default().is_err() {
-        log::debug!("rustls crypto provider already installed");
-    }
-
-    // Initialize CoordinatorPool (retrieves model from lazy registry, creates empty pool)
-    let pool = initialize_coordinator_pool().await?;
-
-    let config = ConfigManager::new();
-    config.init().await?;
-
-    let timestamp = chrono::Utc::now();
-    let pid = std::process::id();
-    let instance_id = format!("{}-{}", timestamp.format("%Y%m%d-%H%M%S-%9f"), pid);
-    let usage_tracker = kodegen_utils::usage_tracker::UsageTracker::new(
-        format!("candle-agent-{}", instance_id)
-    );
-
-    kodegen_mcp_schema::tool::tool_history::init_global_history(instance_id.clone()).await;
-
-    let mut tool_router = ToolRouter::new();
-    let mut prompt_router = PromptRouter::new();
-    let managers = Managers::new();
-
-    // Create memorize session manager
-    let memorize_manager = std::sync::Arc::new(crate::tools::MemorizeSessionManager::new(pool.clone()));
-
-    // Register memory tools (4 tools)
-    (tool_router, prompt_router) = register_tool(
-        tool_router,
-        prompt_router,
-        crate::tools::MemorizeTool::new(memorize_manager.clone()),
-    );
-
-    (tool_router, prompt_router) = register_tool(
-        tool_router,
-        prompt_router,
-        crate::tools::CheckMemorizeStatusTool::new(memorize_manager.clone()),
-    );
-
-    (tool_router, prompt_router) = register_tool(
-        tool_router,
-        prompt_router,
-        crate::tools::RecallTool::new(pool.clone()),
-    );
-
-    (tool_router, prompt_router) = register_tool(
-        tool_router,
-        prompt_router,
-        crate::tools::ListMemoryLibrariesTool::new(pool.clone()),
-    );
-
-    // Start cleanup task for memorize sessions
-    memorize_manager.start_cleanup_task();
-
-    let router_set = RouterSet::new(tool_router, prompt_router, managers);
-
-    // Create session manager
-    let session_config = rmcp::transport::streamable_http_server::session::local::SessionConfig {
-        channel_capacity: 16,
-        keep_alive: Some(std::time::Duration::from_secs(3600)),
+    // Convert separate cert/key into Option<(cert, key)> tuple
+    let tls_config = match (tls_cert, tls_key) {
+        (Some(cert), Some(key)) => Some((cert, key)),
+        _ => None,
     };
-    let session_manager = std::sync::Arc::new(
-        rmcp::transport::streamable_http_server::session::local::LocalSessionManager {
-            sessions: Default::default(),
-            session_config,
-        }
-    );
 
-    // Create HTTP server
-    let server = kodegen_server_http::HttpServer::new(
-        router_set.tool_router,
-        router_set.prompt_router,
-        usage_tracker,
-        config,
-        router_set.managers,
-        session_manager,
-        router_set.connection_cleanup,
-    );
-
-    // Start server with TLS
-    let tls_config = tls_cert.zip(tls_key);
-    let shutdown_timeout = std::time::Duration::from_secs(30);
-    let handle = server.serve_with_tls(addr, tls_config, shutdown_timeout).await?;
-
-    // Return handle for kodegend to control shutdown
-    Ok(handle)
+    // Delegate to start_server_with_listener
+    start_server_with_listener(listener, tls_config).await
 }
 
 /// Start candle-agent HTTP server using pre-bound listener (TOCTOU-safe)
@@ -259,97 +190,59 @@ pub async fn start_server_with_listener(
     listener: tokio::net::TcpListener,
     tls_config: Option<(std::path::PathBuf, std::path::PathBuf)>,
 ) -> anyhow::Result<kodegen_server_http::ServerHandle> {
-    use kodegen_server_http::{Managers, RouterSet, register_tool};
-    use kodegen_config_manager::ConfigManager;
+    use kodegen_server_http::{ServerBuilder, Managers, RouterSet, register_tool};
     use rmcp::handler::server::router::{prompt::PromptRouter, tool::ToolRouter};
 
-    let _ = env_logger::try_init();
+    let mut builder = ServerBuilder::new()
+        .category(kodegen_config::CATEGORY_CANDLE_AGENT)
+        .register_tools(|| async {
+            // Initialize CoordinatorPool (retrieves model from lazy registry, creates empty pool)
+            let pool = initialize_coordinator_pool().await?;
 
-    if rustls::crypto::ring::default_provider().install_default().is_err() {
-        log::debug!("rustls crypto provider already installed");
+            let mut tool_router = ToolRouter::new();
+            let mut prompt_router = PromptRouter::new();
+            let managers = Managers::new();
+
+            // Create memorize session manager
+            let memorize_manager = std::sync::Arc::new(crate::tools::MemorizeSessionManager::new(pool.clone()));
+
+            // Register memory tools (4 tools)
+            (tool_router, prompt_router) = register_tool(
+                tool_router,
+                prompt_router,
+                crate::tools::MemorizeTool::new(memorize_manager.clone()),
+            );
+
+            (tool_router, prompt_router) = register_tool(
+                tool_router,
+                prompt_router,
+                crate::tools::CheckMemorizeStatusTool::new(memorize_manager.clone()),
+            );
+
+            (tool_router, prompt_router) = register_tool(
+                tool_router,
+                prompt_router,
+                crate::tools::RecallTool::new(pool.clone()),
+            );
+
+            (tool_router, prompt_router) = register_tool(
+                tool_router,
+                prompt_router,
+                crate::tools::ListMemoryLibrariesTool::new(pool.clone()),
+            );
+
+            // Start cleanup task for memorize sessions
+            memorize_manager.start_cleanup_task();
+
+            Ok(RouterSet::new(tool_router, prompt_router, managers))
+        })
+        .with_listener(listener);
+
+    if let Some((cert, key)) = tls_config {
+        builder = builder.with_tls_config(cert, key);
     }
 
-    // Initialize CoordinatorPool (retrieves model from lazy registry, creates empty pool)
-    let pool = initialize_coordinator_pool().await?;
-
-    let config = ConfigManager::new();
-    config.init().await?;
-
-    let timestamp = chrono::Utc::now();
-    let pid = std::process::id();
-    let instance_id = format!("{}-{}", timestamp.format("%Y%m%d-%H%M%S-%9f"), pid);
-    let usage_tracker = kodegen_utils::usage_tracker::UsageTracker::new(
-        format!("candle-agent-{}", instance_id)
-    );
-
-    kodegen_mcp_schema::tool::tool_history::init_global_history(instance_id.clone()).await;
-
-    let mut tool_router = ToolRouter::new();
-    let mut prompt_router = PromptRouter::new();
-    let managers = Managers::new();
-
-    // Create memorize session manager
-    let memorize_manager = std::sync::Arc::new(crate::tools::MemorizeSessionManager::new(pool.clone()));
-
-    // Register memory tools (4 tools)
-    (tool_router, prompt_router) = register_tool(
-        tool_router,
-        prompt_router,
-        crate::tools::MemorizeTool::new(memorize_manager.clone()),
-    );
-
-    (tool_router, prompt_router) = register_tool(
-        tool_router,
-        prompt_router,
-        crate::tools::CheckMemorizeStatusTool::new(memorize_manager.clone()),
-    );
-
-    (tool_router, prompt_router) = register_tool(
-        tool_router,
-        prompt_router,
-        crate::tools::RecallTool::new(pool.clone()),
-    );
-
-    (tool_router, prompt_router) = register_tool(
-        tool_router,
-        prompt_router,
-        crate::tools::ListMemoryLibrariesTool::new(pool.clone()),
-    );
-
-    // Start cleanup task for memorize sessions
-    memorize_manager.start_cleanup_task();
-
-    let router_set = RouterSet::new(tool_router, prompt_router, managers);
-
-    // Create session manager
-    let session_config = rmcp::transport::streamable_http_server::session::local::SessionConfig {
-        channel_capacity: 16,
-        keep_alive: Some(std::time::Duration::from_secs(3600)),
-    };
-    let session_manager = std::sync::Arc::new(
-        rmcp::transport::streamable_http_server::session::local::LocalSessionManager {
-            sessions: Default::default(),
-            session_config,
-        }
-    );
-
-    // Create HTTP server
-    let server = kodegen_server_http::HttpServer::new(
-        router_set.tool_router,
-        router_set.prompt_router,
-        usage_tracker,
-        config,
-        router_set.managers,
-        session_manager,
-        router_set.connection_cleanup,
-    );
-
-    // Start server with pre-bound listener
-    let shutdown_timeout = std::time::Duration::from_secs(30);
-    let handle = server.serve_with_listener(listener, tls_config, shutdown_timeout).await?;
-
-    // Return handle for kodegend to control shutdown
-    Ok(handle)
+    builder.serve().await
 }
 
 // Helper function for pool initialization

@@ -3,7 +3,7 @@
 //! Serves memory tools via HTTP/HTTPS transport using kodegen_server_http.
 
 use anyhow::{Result, anyhow};
-use kodegen_server_http::{run_http_server, Managers, RouterSet, register_tool};
+use kodegen_server_http::{ServerBuilder, Managers, RouterSet, register_tool};
 use rmcp::handler::server::router::{prompt::PromptRouter, tool::ToolRouter};
 use std::sync::Arc;
 
@@ -16,11 +16,12 @@ use kodegen_candle_agent::tools::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize CoordinatorPool before run_http_server (async initialization)
-    let pool = initialize_coordinator_pool().await?;
+    ServerBuilder::new()
+        .category(kodegen_config::CATEGORY_CANDLE_AGENT)
+        .register_tools(|| async {
+            // Initialize CoordinatorPool (async initialization)
+            let pool = initialize_coordinator_pool().await?;
 
-    run_http_server("candle-agent", |_config, _tracker| {
-        Box::pin(async move {
             let mut tool_router = ToolRouter::new();
             let mut prompt_router = PromptRouter::new();
             let managers = Managers::new();
@@ -58,8 +59,8 @@ async fn main() -> Result<()> {
 
             Ok(RouterSet::new(tool_router, prompt_router, managers))
         })
-    })
-    .await
+        .run()
+        .await
 }
 
 async fn initialize_coordinator_pool() -> Result<Arc<CoordinatorPool>> {
