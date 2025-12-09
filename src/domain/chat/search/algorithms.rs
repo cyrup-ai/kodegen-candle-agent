@@ -276,8 +276,8 @@ impl ChatSearchIndex {
             // Build the phrase to search for
             let phrase: String = terms_clone
                 .iter()
-                .map(AsRef::as_ref)
-                .collect::<Vec<_>>()
+                .map(String::as_str)
+                .collect::<Vec<&str>>()
                 .join(" ");
 
             // Search through all documents for exact phrase match
