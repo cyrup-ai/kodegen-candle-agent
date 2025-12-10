@@ -1,6 +1,6 @@
 [package]
 name = "kodegen_candle_agent"
-version = "0.10.1"
+version = "0.10.2"
 edition = "2024"
 description = "KODEGEN.ᴀɪ: Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
 authors = ["KODEGEN.ᴀɪ"]
@@ -44,7 +44,7 @@ bitflags = { version = "2", features = ["serde"] }
 ctrlc = { version = "3", features = ["termination"] }
 
 # Workspace MCP infrastructure
-rmcp = { version = "0.10", features = ["client", "schemars", "server", "transport-child-process", "transport-io", "transport-sse-client", "transport-sse-client-reqwest", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "0.11", features = ["client", "schemars", "server", "transport-child-process", "transport-io", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
 
 # Keep simd-json for potential other performance needs (not for MCP types)
 simd-json = { version = "0.17", default-features = false, features = ["known-key", "runtime-detection", "swar-number-parsing", "value-no-dup-keys"] }
@@ -61,8 +61,8 @@ quick-xml = { version = "0.38", features = ["serialize"] }
 plist = "1"
 
 # SurrealDB and its features
-surrealdb = { version = "3.0.0-alpha.11", features = ["kv-surrealkv"] }
-surrealdb_types = { package = "surrealdb-types", version = "3.0.0-alpha.11" }
+surrealdb = { version = "3.0.0-alpha.17", features = ["kv-surrealkv"] }
+surrealdb_types = { package = "surrealdb-types", version = "3.0.0-alpha.17" }
 
 # Async runtime (from memory package)
 futures = { version = "0.3" }
@@ -85,13 +85,13 @@ memchr = { version = "2" }
 mime_guess = "2"
 
 # Cognitive system dependencies (from memory package)
-ndarray = { version = "0.16" }
+ndarray = { version = "0.17" }
 nalgebra = { version = "0.34", features = ["serde-serialize"] }
 petgraph = { version = "0.8" }
 ordered-float = { version = "5" }
 
 # Crypto/hashing (from memory package)
-sha2 = { version = "0.11.0-rc.2" }
+sha2 = { version = "0.11.0-rc.3" }
 
 # File system (from memory package)
 walkdir = { version = "2" }
@@ -101,7 +101,7 @@ walkdir = { version = "2" }
 num-complex = { version = "0.4" }
 
 # Vector store implementations (from memory package)
-faiss = { version = "0.12", optional = true }
+faiss = { version = "0.13", optional = true }
 hnsw = { version = "0.11", optional = true }
 instant-distance = { version = "0.6" }
 
@@ -112,7 +112,7 @@ tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
 
 # Additional utilities (from memory package)
 atomic = "0.6"
-jsonwebtoken = "9"
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 csv = "1"
 prometheus = { version = "0.14" }
 
@@ -127,7 +127,7 @@ tokenizers = "0.22"
 half = { version = "2", optional = true }
 metal = { version = "0.32", optional = true }
 candle-metal-kernels = { version = "0.9.2-alpha.1", optional = true }
-cudarc = { version = "0.17", optional = true, default-features = false, features = [
+cudarc = { version = "0.18", optional = true, default-features = false, features = [
     "cublas",
     "cublaslt",
     "cudnn",
@@ -146,7 +146,7 @@ symphonia = { version = "0.5", features = ["all"], optional = true }
 # Core dependencies
 serde = { version = "1", features = ["derive"] }
 schemars = { version = "1", features = ["derive"] }
-jsonschema = "0.33"
+jsonschema = "0.37"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 serde_json = "1"
@@ -176,7 +176,7 @@ js-sys = { version = "0.3", optional = true }
 web-sys = { version = "0.3", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 jwalk = "0.8"
-flume = "0.11"
+flume = "0.12"
 rayon = { version = "1", optional = true }
 gix = { version = "0.75", default-features = false, features = [
     "blob-diff",
@@ -204,13 +204,13 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Ultra-high-performance dependencies for zero-allocation operations
 arrayvec = { version = "0.7", features = ["serde"] }
-smallvec = { version = "2.0.0-alpha.11", features = ["serde"] }
+smallvec = { version = "2.0.0-alpha.12", features = ["serde"] }
 
 # System information for memory queries
 sysinfo = "0.37"
 crossbeam-skiplist = "0.1"  # Used for SkipMap - different purpose
 
-wide = "0.8"
+wide = "1.0"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 lazy_static = "1"
 ropey = "2.0.0-beta.1"
@@ -254,10 +254,10 @@ globset = { version = "0.4", optional = true }
 
 [dev-dependencies]
 # Testing (from memory package)
-mockall = { version = "0.13" }
+mockall = { version = "0.14" }
 mockito = { version = "1" }
 assert_approx_eq = { version = "1" }
-criterion = { version = "0.7" }
+criterion = { version = "0.8" }
 tempfile = { version = "3" }
 env_logger = "0.11"
 jemalloc-sys = "0.5"
