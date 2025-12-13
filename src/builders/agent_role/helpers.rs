@@ -54,33 +54,40 @@ impl CandleAgentRoleAgent {
                 let on_chunk_handler = state.on_chunk_handler.clone();
                 let _on_tool_result_handler = state.on_tool_result_handler.clone();
 
-                // Spawn local kodegen binary for tool execution
-                let mcp_client = match create_stdio_client("kodegen", &[]).await
-                {
-                    Ok((client, _connection)) => {
-                        // Connection established - client is cheaply clone-able
-                        // _connection dropped here but that's OK - we only need tools for this inference cycle
-                        let tool_count = client
-                            .list_tools()
-                            .await
-                            .map(|tools| tools.len())
-                            .unwrap_or(0);
+                // Only spawn kodegen for tool execution if tools are expected to be used
+                // Skip for pure inference use cases (like browser-agent) to avoid slow connection timeouts
+                let needs_tools = !state.tools.is_empty() || state.on_tool_result_handler.is_some();
+                
+                let mcp_client = if needs_tools {
+                    match create_stdio_client("kodegen", &[]).await {
+                        Ok((client, _connection)) => {
+                            // Connection established - client is cheaply clone-able
+                            let tool_count = client
+                                .list_tools()
+                                .await
+                                .map(|tools| tools.len())
+                                .unwrap_or(0);
 
-                        log::info!(
-                            "✅ Spawned kodegen process - {} tools available",
-                            tool_count
-                        );
+                            log::info!(
+                                "✅ Spawned kodegen process - {} tools available",
+                                tool_count
+                            );
 
-                        Some(client)
+                            Some(client)
+                        }
+                        Err(e) => {
+                            // Failed to spawn kodegen - agent will work without tools
+                            log::warn!(
+                                "⚠️  Failed to spawn kodegen: {} - Agent will work without tools",
+                                e
+                            );
+                            None
+                        }
                     }
-                    Err(e) => {
-                        // Failed to spawn kodegen - agent will work without tools
-                        log::warn!(
-                            "⚠️  Failed to spawn kodegen: {} - Agent will work without tools",
-                            e
-                        );
-                        None
-                    }
+                } else {
+                    // Pure inference mode - no tools needed, skip kodegen spawn
+                    log::debug!("Skipping kodegen spawn - no tools configured");
+                    None
                 };
 
                 // Build prompt - system_prompt always exists (no memory in recursive calls)

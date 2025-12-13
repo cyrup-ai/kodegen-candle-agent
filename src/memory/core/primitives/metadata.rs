@@ -79,7 +79,7 @@ impl MemoryMetadata {
             context: "General".to_string(),
             keywords: Vec::new(),
             tags: Vec::new(),
-            category: format!("{:?}", memory_type),
+            category: memory_type.to_string(),
             importance: 0.5,
             source: None,
             created_at: Datetime::now(),
@@ -92,7 +92,7 @@ impl MemoryMetadata {
     /// Create new metadata with memory type
     pub fn with_type(memory_type: MemoryTypeEnum) -> Self {
         let mut metadata = Self::new();
-        metadata.category = format!("{:?}", memory_type);
+        metadata.category = memory_type.to_string();
         metadata
     }
 

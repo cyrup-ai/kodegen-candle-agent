@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use kodegen_mcp_client::{KodegenClient, KodegenConnection, create_streamable_client};
 use rmcp::model::{CallToolResult, ServerInfo};
 use serde::de::DeserializeOwned;
+use reqwest::header::HeaderMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex as StdMutex, OnceLock};
 use tokio::io::{AsyncWriteExt, BufWriter};
@@ -14,12 +15,12 @@ use tokio::sync::Mutex;
 use std::sync::Arc;
 
 /// Candle-agent HTTP server configuration
-const HTTP_PORT: u16 = 30452;
+const HTTP_PORT: u16 = kodegen_config::PORT_CANDLE_AGENT - 10000;
 const BINARY_NAME: &str = "kodegen-candle-agent";
 const PACKAGE_NAME: &str = "kodegen_candle_agent";
 
 /// HTTP server URL for candle-agent examples
-const HTTP_URL: &str = "http://127.0.0.1:30452/mcp";
+const HTTP_URL: &str = const_format::formatcp!("http://127.0.0.1:{}/mcp", kodegen_config::PORT_CANDLE_AGENT - 10000);
 
 /// Cached workspace root
 static WORKSPACE_ROOT: OnceLock<PathBuf> = OnceLock::new();
@@ -167,7 +168,7 @@ pub async fn connect_with_retry(
     loop {
         attempt += 1;
 
-        match create_streamable_client(url).await {
+        match create_streamable_client(url, HeaderMap::new()).await {
             Ok(result) => {
                 eprintln!(
                     "✅ Connected to HTTP server in {:?} (attempt {})",
@@ -221,10 +222,10 @@ pub async fn connect_to_local_http_server() -> Result<(KodegenConnection, Server
     let child = cmd.spawn().context("Failed to spawn HTTP server process")?;
     let server_handle = ServerHandle::new(child);
 
-    eprintln!("⏳ Waiting for server to be ready (this may take up to 90s on first compile)...");
+    eprintln!("⏳ Waiting for server to be ready (this may take up to 5 minutes on first compile)...");
     let (_client, connection) = connect_with_retry(
         HTTP_URL,
-        std::time::Duration::from_secs(90),
+        std::time::Duration::from_secs(300),
         std::time::Duration::from_millis(500),
     )
     .await
@@ -300,25 +301,58 @@ impl LoggingClient {
     ) -> Result<T, kodegen_mcp_client::ClientError> {
         let result = self.call_tool(name, arguments).await?;
 
+        // Find the JSON response - try last text item first (kodegen-candle-agent format),
+        // fall back to first item for simple responses
         let text_content = result
             .content
-            .first()
-            .and_then(|c| c.as_text())
+            .iter()
+            .rev()
+            .find_map(|c| c.as_text())
+            .or_else(|| result.content.first().and_then(|c| c.as_text()))
             .ok_or_else(|| {
-                kodegen_mcp_client::ClientError::ParseError(format!(
+                kodegen_mcp_client::ClientError::Protocol(format!(
                     "No text content in response from tool '{name}'"
                 ))
             })?;
 
         serde_json::from_str(&text_content.text).map_err(|e| {
-            kodegen_mcp_client::ClientError::ParseError(format!(
-                "Failed to parse response from tool '{name}': {e}"
-            ))
+            kodegen_mcp_client::ClientError::ParseError {
+                tool_name: name.to_string(),
+                source: e,
+            }
         })
     }
 
     pub fn server_info(&self) -> Option<&ServerInfo> {
         self.inner.server_info()
+    }
+
+    /// Shutdown the logging client, ensuring all buffered writes are flushed
+    ///
+    /// This method consumes self to prevent use-after-shutdown (type-safe).
+    /// It unwraps the Arc to ensure exclusive ownership and flushes the buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The LoggingClient has been cloned (Arc has multiple references)
+    /// - The final flush operation fails
+    pub async fn shutdown(self) -> Result<()> {
+        // Unwrap the Arc - this fails if there are multiple references
+        // (which shouldn't happen in normal usage since we don't clone the client)
+        let mutex = Arc::try_unwrap(self.log_file)
+            .map_err(|_| anyhow::anyhow!(
+                "Cannot shutdown LoggingClient: multiple references still exist"
+            ))?;
+        
+        // Get the BufWriter from the Mutex
+        let mut writer = mutex.into_inner();
+        
+        // Final flush to ensure all buffered writes complete
+        writer.flush().await.context("Failed to flush log file during shutdown")?;
+        
+        // BufWriter and File are automatically dropped here, closing the file
+        Ok(())
     }
 
     async fn log_call(

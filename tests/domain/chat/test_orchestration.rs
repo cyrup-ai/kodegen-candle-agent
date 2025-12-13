@@ -25,6 +25,7 @@ fn test_format_tools_for_selection() {
             output_schema: None,
             annotations: None,
             icons: None,
+            meta: None,
         },
         ToolInfo {
             name: Cow::Owned("search".to_string()),
@@ -34,6 +35,7 @@ fn test_format_tools_for_selection() {
             output_schema: None,
             annotations: None,
             icons: None,
+            meta: None,
         },
     ];
 
@@ -60,6 +62,7 @@ fn test_get_selected_tool_schemas() {
             output_schema: None,
             annotations: None,
             icons: None,
+            meta: None,
         },
         ToolInfo {
             name: Cow::Owned("tool2".to_string()),
@@ -69,6 +72,7 @@ fn test_get_selected_tool_schemas() {
             output_schema: None,
             annotations: None,
             icons: None,
+            meta: None,
         },
     ];
 

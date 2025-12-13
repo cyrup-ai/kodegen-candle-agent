@@ -19,6 +19,7 @@ use uuid::Uuid;
 /// Stack-allocated enum with no heap usage and branch prediction optimization
 /// All variants are Copy for zero-allocation semantics
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 #[repr(u8)] // Optimize for minimal size and fast comparison
 pub enum MemoryTypeEnum {
     /// Factual information and knowledge

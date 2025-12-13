@@ -76,14 +76,14 @@ impl SurrealDBMemoryManager {
                 DEFINE FIELD IF NOT EXISTS memory_type ON memory TYPE string;
                 DEFINE FIELD IF NOT EXISTS created_at ON memory TYPE datetime;
                 DEFINE FIELD IF NOT EXISTS updated_at ON memory TYPE datetime;
-                DEFINE FIELD IF NOT EXISTS metadata ON memory FLEXIBLE TYPE object;
+                DEFINE FIELD IF NOT EXISTS metadata ON memory TYPE object FLEXIBLE;
                 DEFINE FIELD IF NOT EXISTS metadata.created_at ON memory TYPE datetime;
                 DEFINE FIELD IF NOT EXISTS metadata.last_accessed_at ON memory TYPE datetime;
                 DEFINE FIELD IF NOT EXISTS metadata.importance ON memory TYPE float;
-                DEFINE FIELD IF NOT EXISTS metadata.embedding ON memory FLEXIBLE TYPE option<array<float>>;
+                DEFINE FIELD IF NOT EXISTS metadata.embedding ON memory TYPE option<array<float>>;
                 DEFINE FIELD IF NOT EXISTS metadata.tags ON memory TYPE array<string>;
                 DEFINE FIELD IF NOT EXISTS metadata.keywords ON memory TYPE array<string>;
-                DEFINE FIELD IF NOT EXISTS metadata.custom ON memory FLEXIBLE TYPE option<object>;
+                DEFINE FIELD IF NOT EXISTS metadata.custom ON memory TYPE option<object> FLEXIBLE;
                 ",
             )
             .await
@@ -100,7 +100,7 @@ impl SurrealDBMemoryManager {
                 DEFINE FIELD IF NOT EXISTS created_at ON relationship TYPE datetime;
                 DEFINE FIELD IF NOT EXISTS updated_at ON relationship TYPE datetime;
                 DEFINE FIELD IF NOT EXISTS strength ON relationship TYPE option<float>;
-                DEFINE FIELD IF NOT EXISTS metadata ON relationship FLEXIBLE TYPE option<object>;
+                DEFINE FIELD IF NOT EXISTS metadata ON relationship TYPE option<object> FLEXIBLE;
                 ",
             )
             .await
@@ -128,8 +128,9 @@ impl SurrealDBMemoryManager {
                 Error::Database(format!("Failed to define quantum_signature table: {:?}", e))
             })?;
 
-        // Define MTREE index for vector similarity search
-        self.db
+        // Define MTREE index for vector similarity search (optional - may fail on SurrealDB v3)
+        // MTREE syntax changed in SurrealDB v3 - this is an optimization index, not required
+        if let Err(e) = self.db
             .query(
                 "
                 DEFINE INDEX IF NOT EXISTS memory_embedding_mtree ON memory 
@@ -140,7 +141,9 @@ impl SurrealDBMemoryManager {
                 ",
             )
             .await
-            .map_err(|e| Error::Database(format!("Failed to define MTREE index: {:?}", e)))?;
+        {
+            log::warn!("MTREE index creation skipped (SurrealDB v3 compatibility): {:?}", e);
+        }
 
         // CRITICAL INDEX 1: Content deduplication (UNIQUE)
         self.db
@@ -220,8 +223,9 @@ impl SurrealDBMemoryManager {
             .await
             .map_err(|e| Error::Database(format!("Failed to define simple analyzer: {:?}", e)))?;
 
-        // CRITICAL INDEX 7: Full-text content search
-        self.db
+        // Full-text content search index (optional - may fail on SurrealDB v3)
+        // SEARCH ANALYZER syntax changed in SurrealDB v3 - this is an optimization, not required
+        if let Err(e) = self.db
             .query(
                 "
                 DEFINE INDEX IF NOT EXISTS memory_content_search ON memory
@@ -230,7 +234,9 @@ impl SurrealDBMemoryManager {
                 ",
             )
             .await
-            .map_err(|e| Error::Database(format!("Failed to define content_search index: {:?}", e)))?;
+        {
+            log::warn!("Full-text search index creation skipped (SurrealDB v3 compatibility): {:?}", e);
+        }
 
         // Define entanglement edges (graph relations)
         self.db
@@ -422,7 +428,7 @@ impl SurrealDBMemoryManager {
                 .bind(("id", memory.id.clone()))
                 .bind(("content", content.content))
                 .bind(("content_hash", content.content_hash))
-                .bind(("memory_type", format!("{:?}", content.memory_type)))
+                .bind(("memory_type", content.memory_type.to_string()))
                 .bind(("created_at", memory.created_at))
                 .bind(("updated_at", memory.updated_at))
                 .bind(("metadata", content.metadata))

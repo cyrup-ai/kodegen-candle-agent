@@ -54,7 +54,57 @@ impl MemoryManager for SurrealDBMemoryManager {
                     log::warn!("create_memory: No embedding present for memory {}", memory.id);
                 }
 
-                // Use type:id syntax in CREATE statement with just the UUID string
+                // Check for duplicate content_hash before CREATE
+                let check_query = "SELECT * FROM memory WHERE content_hash = $content_hash LIMIT 1";
+                let mut check_response = db
+                    .query(check_query)
+                    .bind(("content_hash", content.content_hash))
+                    .await
+                    .map_err(|e| Error::Database(format!("{:?}", e)))?;
+
+                let existing: Vec<MemoryNodeSchema> = check_response
+                    .take(0)
+                    .map_err(|e| Error::Database(format!("{:?}", e)))?;
+
+                if let Some(existing_memory) = existing.first() {
+                    // Duplicate detected - reset importance to maximum (1.0)
+                    let max_importance = 1.0_f32;
+                    let now = memory.updated_at;
+                    let current_importance = existing_memory.metadata.importance;
+
+                    log::info!(
+                        "Duplicate content_hash detected: {} - Resetting importance: {} -> {} (MAX)",
+                        content.content_hash,
+                        current_importance,
+                        max_importance
+                    );
+
+                    // Update existing record with max importance
+                    let update_query = format!(
+                        "UPDATE {} SET metadata.importance = $importance, metadata.last_accessed_at = $timestamp, updated_at = $updated_at RETURN AFTER",
+                        existing_memory.id.to_sql()
+                    );
+
+                    let mut update_response = db
+                        .query(&update_query)
+                        .bind(("importance", max_importance))
+                        .bind(("timestamp", now))
+                        .bind(("updated_at", now))
+                        .await
+                        .map_err(|e| Error::Database(format!("{:?}", e)))?;
+
+                    let updated: Vec<MemoryNodeSchema> = update_response
+                        .take(0)
+                        .map_err(|e| Error::Database(format!("{:?}", e)))?;
+
+                    return updated
+                        .into_iter()
+                        .next()
+                        .map(SurrealDBMemoryManager::from_schema)
+                        .ok_or_else(|| Error::Other("Failed to update existing memory".to_string()));
+                }
+
+                // No duplicate - proceed with CREATE
                 let query = format!("
                     CREATE memory:{} CONTENT {{
                         content: $content,
@@ -70,7 +120,7 @@ impl MemoryManager for SurrealDBMemoryManager {
                     .query(&query)
                     .bind(("content", content.content))
                     .bind(("content_hash", content.content_hash))
-                    .bind(("memory_type", format!("{:?}", content.memory_type)))
+                    .bind(("memory_type", content.memory_type.to_string()))
                     .bind(("created_at", memory.created_at))
                     .bind(("updated_at", memory.updated_at))
                     .bind(("metadata", content.metadata))
@@ -160,7 +210,7 @@ impl MemoryManager for SurrealDBMemoryManager {
                     .query(&query)
                     .bind(("content", content.content))
                     .bind(("content_hash", content.content_hash))
-                    .bind(("memory_type", format!("{:?}", content.memory_type)))
+                    .bind(("memory_type", content.memory_type.to_string()))
                     .bind(("updated_at", memory.updated_at))
                     .bind(("metadata", content.metadata))
                     .await
@@ -294,13 +344,10 @@ impl MemoryManager for SurrealDBMemoryManager {
         let db = self.db.clone();
 
         tokio::spawn(async move {
-            let type_str = format!("{:?}", memory_type);
-            let query = format!(
-                "SELECT * FROM memory WHERE memory_type = \"{}\" ORDER BY metadata.created_at DESC LIMIT 100",
-                type_str
-            );
+            let memory_type_str = memory_type.to_string();
+            let query = "SELECT * FROM memory WHERE memory_type = $memory_type ORDER BY metadata.created_at DESC LIMIT 100";
 
-            match db.query(&query).await {
+            match db.query(query).bind(("memory_type", memory_type_str)).await {
                 Ok(mut response) => {
                     let results: Vec<MemoryNodeSchema> = response.take(0).unwrap_or_default();
 

@@ -6,6 +6,7 @@ use super::utils::{
     configure_stella_tokenizer, create_stella_config, load_stella_weights,
 };
 use crate::capability::traits::TextEmbeddingCapable;
+use crate::core::device_util::detect_best_device;
 use crate::domain::model::CandleModelInfo;
 use crate::domain::model::traits::CandleModel;
 use anyhow::{Context, anyhow};
@@ -84,8 +85,9 @@ impl LoadedStellaModel {
         let variant = detect_variant(base_model.info().registry_key);
         let embed_dim = embed_dim(dimension as u32)?;
 
-        // Use CPU for Stella embeddings (Metal has GPU→CPU transfer issues in async contexts)
-        let device = Device::Cpu;
+        // Use best available device (Metal/CUDA/CPU) - async issues handled by spawn_blocking in embed()
+        let device = detect_best_device()
+            .context("Failed to detect compute device")?;
         let dtype = DType::F32;
 
         // Load files from HuggingFace

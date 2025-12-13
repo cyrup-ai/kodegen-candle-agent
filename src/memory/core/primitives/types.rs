@@ -5,11 +5,13 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::str::FromStr;
 
+use anyhow;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use surrealdb::types::{Datetime as SurrealDatetime, SurrealValue};
+use surrealdb_types;
 
 use crate::memory::graph::entity::BaseEntity;
 use crate::memory::primitives::metadata::MemoryMetadata;
@@ -22,7 +24,8 @@ fn json_to_surreal_value(json: serde_json::Value) -> surrealdb::types::Value {
 }
 
 /// Memory type enum
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default, SurrealValue)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum MemoryTypeEnum {
     /// Semantic memory (knowledge graph)
     Semantic,
@@ -68,6 +71,24 @@ impl FromStr for MemoryTypeEnum {
 
     fn from_str(s: &str) -> Result<Self> {
         Self::from_string(s)
+    }
+}
+
+// Manual SurrealValue implementation to handle string serialization/deserialization
+impl SurrealValue for MemoryTypeEnum {
+    fn kind_of() -> surrealdb_types::Kind {
+        surrealdb_types::Kind::String
+    }
+
+    fn into_value(self) -> surrealdb::types::Value {
+        // Serialize as a string using Display trait
+        SurrealValue::into_value(self.to_string())
+    }
+
+    fn from_value(value: surrealdb::types::Value) -> anyhow::Result<Self> {
+        // Deserialize from string using FromStr
+        let s = String::from_value(value)?;
+        s.parse().map_err(|e: Error| anyhow::anyhow!("{}", e))
     }
 }
 

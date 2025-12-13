@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Mutex};
 
 use crate::capability::registry::TextEmbeddingModel;
 use crate::memory::core::manager::coordinator::MemoryCoordinator;
@@ -23,8 +23,15 @@ use crate::memory::utils::{Error, Result};
 /// - Caching: Reuses existing coordinators for subsequent requests
 /// - Filesystem scanning: Lists available libraries by scanning .db files
 pub struct CoordinatorPool {
+    /// Cache of coordinators by library name
     coordinators: Arc<RwLock<HashMap<String, Arc<MemoryCoordinator>>>>,
+    
+    /// Shared embedding model (reused across all libraries)
     embedding_model: TextEmbeddingModel,
+    
+    /// Per-library initialization locks (prevents concurrent creation)
+    /// Key: library_name, Value: Mutex guard for that library's initialization
+    init_locks: Arc<RwLock<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 impl CoordinatorPool {
@@ -49,6 +56,7 @@ impl CoordinatorPool {
         Self {
             coordinators: Arc::new(RwLock::new(HashMap::new())),
             embedding_model,
+            init_locks: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -79,39 +87,65 @@ impl CoordinatorPool {
     /// # }
     /// ```
     pub async fn get_coordinator(&self, library_name: &str) -> Result<Arc<MemoryCoordinator>> {
-        // Check cache first (read lock - allows concurrent reads)
+        // Fast path: Check cache first (read lock - allows concurrent reads)
+        {
+            let coordinators = self.coordinators.read().await;
+            if let Some(coordinator) = coordinators.get(library_name) {
+                log::debug!("Reusing cached coordinator for library '{}'", library_name);
+                return Ok(coordinator.clone());
+            }
+        }
+        
+        // Slow path: Need to create coordinator - acquire per-library initialization lock
+        log::info!("Creating new coordinator for library '{}' (first access)", library_name);
+        
+        // Get or create initialization lock for this specific library
+        let init_lock = {
+            // First try read lock (optimistic - lock might already exist)
+            {
+                let locks = self.init_locks.read().await;
+                if let Some(lock) = locks.get(library_name) {
+                    lock.clone()
+                } else {
+                    // Lock doesn't exist - need write lock to create it
+                    drop(locks); // Explicitly drop read lock before acquiring write lock
+                    let mut locks = self.init_locks.write().await;
+                    
+                    // Double-check (another task might have created it while we waited)
+                    locks.entry(library_name.to_string())
+                        .or_insert_with(|| Arc::new(Mutex::new(())))
+                        .clone()
+                }
+            }
+        };
+        
+        // Acquire the library-specific initialization lock
+        // This ensures only ONE task initializes this library at a time
+        let _guard = init_lock.lock().await;
+        
+        // Re-check cache now that we hold the lock
+        // (another task might have completed initialization while we waited for lock)
         {
             let coordinators = self.coordinators.read().await;
             if let Some(coordinator) = coordinators.get(library_name) {
                 log::debug!(
-                    "Reusing cached coordinator for library '{}'",
+                    "Coordinator for library '{}' was created while waiting for lock, using that one",
                     library_name
                 );
                 return Ok(coordinator.clone());
             }
         }
-
-        // Not in cache - create new coordinator (requires write lock)
-        log::info!(
-            "Creating new coordinator for library '{}' (first access)",
-            library_name
-        );
-
+        
+        // We hold the lock and cache is still empty - safe to create coordinator
+        log::info!("Initializing coordinator for library '{}' with exclusive lock", library_name);
+        
         let coordinator =
             MemoryCoordinator::from_library(library_name, self.embedding_model.clone()).await?;
         let coordinator_arc = Arc::new(coordinator);
-
+        
         // Cache it
         {
             let mut coordinators = self.coordinators.write().await;
-            // Double-check in case another task created it while we were waiting for lock
-            if let Some(existing) = coordinators.get(library_name) {
-                log::debug!(
-                    "Coordinator for library '{}' was created by another task, using that one",
-                    library_name
-                );
-                return Ok(existing.clone());
-            }
             coordinators.insert(library_name.to_string(), coordinator_arc.clone());
             log::info!(
                 "Cached coordinator for library '{}' (total: {} libraries)",
@@ -119,7 +153,8 @@ impl CoordinatorPool {
                 coordinators.len()
             );
         }
-
+        
+        // Lock is automatically released when _guard goes out of scope
         Ok(coordinator_arc)
     }
 

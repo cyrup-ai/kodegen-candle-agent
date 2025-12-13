@@ -269,7 +269,7 @@ pub async fn get_metrics(
         MemoryTypeEnum::Working,
         MemoryTypeEnum::LongTerm,
     ] {
-        let type_str = format!("{:?}", memory_type);
+        let type_str = memory_type.to_string();
         let count: Option<u64> = state.memory_manager
             .database()
             .query(format!("SELECT count() AS total FROM memory WHERE memory_type = '{}'", type_str))

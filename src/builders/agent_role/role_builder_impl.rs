@@ -256,9 +256,9 @@ impl CandleAgentRoleBuilder for CandleAgentRoleBuilderImpl {
         let text_model = match self.text_to_text_model {
             Some(model) => model,
             None => {
-                registry::get::<TextToTextModel>("qwen-3")
+                registry::get::<TextToTextModel>("Qwen/Qwen2.5-Coder-3B-Instruct-GGUF")
                     .ok_or_else(|| AgentError::Config(
-                        "Default 'qwen-3' model not found in registry. \
+                        "Default Qwen model not found in registry. \
                          Ensure registry is properly initialized at startup or specify a model explicitly using .model()".to_string()
                     ))?
             }

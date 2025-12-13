@@ -39,6 +39,7 @@ use crate::memory::core::manager::coordinator::MemoryCoordinator;
 use crate::memory::core::manager::surreal::MemoryManager; // Trait must be in scope
 use crate::memory::primitives::node::MemoryNode as CoreMemoryNode;
 use crate::memory::primitives::types::{MemoryContent, MemoryTypeEnum as CoreMemoryTypeEnum};
+use kodegen_mcp_client::create_stdio_client;
 
 use crate::domain::completion::types::ToolInfo;
 use cyrup_sugars::collections::ZeroOneOrMany;
@@ -155,12 +156,23 @@ fn process_break_loop() -> CandleMessageChunk {
 }
 
 /// Initialize MCP client for tool execution
+/// 
+/// Only spawns kodegen if tools are configured. Pure inference use cases
+/// (like browser-agent) skip the spawn to avoid slow connection timeouts.
 async fn initialize_mcp_client(
-    _sender: &tokio::sync::mpsc::UnboundedSender<CandleMessageChunk>,
+    tools: &Arc<[ToolInfo]>,
+    on_tool_result_handler: Option<&OnToolResultHandler>,
 ) -> Option<kodegen_mcp_client::KodegenClient> {
+    // Only spawn kodegen for tool execution if tools are expected to be used
+    // Skip for pure inference use cases to avoid slow connection timeouts
+    let needs_tools = !tools.is_empty() || on_tool_result_handler.is_some();
+    
+    if !needs_tools {
+        log::debug!("Skipping kodegen spawn - no tools configured");
+        return None;
+    }
+    
     // Spawn local kodegen binary for tool execution
-    use kodegen_mcp_client::create_stdio_client;
-
     match create_stdio_client("kodegen", &[]).await {
         Ok((client, _connection)) => {
             log::info!("✅ Spawned kodegen process for tool execution");
@@ -585,8 +597,8 @@ async fn handle_user_prompt<S: std::hash::BuildHasher>(
         return;
     }
 
-    // Initialize MCP client for tool execution
-    let mcp_client = initialize_mcp_client(sender).await;
+    // Initialize MCP client for tool execution (only if tools are configured)
+    let mcp_client = initialize_mcp_client(tools, on_tool_result_handler).await;
 
     // Search memory and build prompt
     let memory_context = search_and_format_memory(memory, &user_message).await;
