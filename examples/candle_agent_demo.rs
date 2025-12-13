@@ -358,16 +358,18 @@ async fn wait_for_memorize_completion(
                 // Log progress every N attempts
                 if attempt % config.progress_log_interval == 0 {
                     info!(
-                        "      ⏳ Still processing... Stage: {}, Runtime: {}ms (attempt {})",
+                        "      ⏳ Still processing... Stage: {}, Runtime: {}ms (session_id: {}, elapsed: {}ms, attempt: {})",
                         status.progress.stage, 
                         status.runtime_ms,
+                        session_id,
+                        start.elapsed().as_millis(),
                         attempt
                     );
                 }
                 
                 // Sleep with cancellation support using tokio::select!
                 tokio::select! {
-                    _ = tokio::time::sleep(interval) => {
+                    _ = tokio::time::sleep(current_interval) => {
                         // Sleep completed normally, continue loop
                     },
                     _ = cancel_token.cancelled() => {
@@ -379,8 +381,10 @@ async fn wait_for_memorize_completion(
                     }
                 }
                 
-                // Exponential backoff: double the interval, cap at max_interval
-                interval = (interval * 2).min(max_interval);
+                // Exponential backoff: double the interval, cap at max_interval (if enabled)
+                if config.enable_backoff {
+                    current_interval = (current_interval * 2).min(max_interval);
+                }
             }
             other => {
                 // Structured log for machine-readable aggregation
@@ -555,6 +559,9 @@ async fn run_memory_example(
     info!("  (Async Session Pattern)");
     info!("========================================\n");
 
+    // Create polling configuration from environment variables
+    let config = PollingConfig::from_env();
+
     // ========================================================================
     // PHASE 1: Create memories in two different libraries (concurrent)
     // ========================================================================
@@ -576,7 +583,7 @@ async fn run_memory_example(
                 .await
                 .context("Failed to start memorize #1")?;
             info!("   → Session started: {}", session.session_id);
-            let mem_id = wait_for_memorize_completion(client, &session.session_id, cancel_token.clone())
+            let mem_id = wait_for_memorize_completion(client, &session.session_id, &config, cancel_token.clone())
                 .await
                 .with_context(|| format!("Failed to complete memorize for session '{}'", session.session_id))?;
             info!("   ✅ Created memory: {}", mem_id);
@@ -597,7 +604,7 @@ async fn run_memory_example(
                 .await
                 .context("Failed to start memorize #2")?;
             info!("   → Session started: {}", session.session_id);
-            let mem_id = wait_for_memorize_completion(client, &session.session_id, cancel_token.clone())
+            let mem_id = wait_for_memorize_completion(client, &session.session_id, &config, cancel_token.clone())
                 .await
                 .with_context(|| format!("Failed to complete memorize for session '{}'", session.session_id))?;
             info!("   ✅ Created memory: {}", mem_id);
@@ -618,7 +625,7 @@ async fn run_memory_example(
                 .await
                 .context("Failed to start memorize #3")?;
             info!("   → Session started: {}", session.session_id);
-            let mem_id = wait_for_memorize_completion(client, &session.session_id, cancel_token.clone())
+            let mem_id = wait_for_memorize_completion(client, &session.session_id, &config, cancel_token.clone())
                 .await
                 .with_context(|| format!("Failed to complete memorize for session '{}'", session.session_id))?;
             info!("   ✅ Created memory: {}", mem_id);
@@ -639,7 +646,7 @@ async fn run_memory_example(
                 .await
                 .context("Failed to start memorize #4")?;
             info!("   → Session started: {}", session.session_id);
-            let mem_id = wait_for_memorize_completion(client, &session.session_id, cancel_token.clone())
+            let mem_id = wait_for_memorize_completion(client, &session.session_id, &config, cancel_token.clone())
                 .await
                 .with_context(|| format!("Failed to complete memorize for session '{}'", session.session_id))?;
             info!("   ✅ Created memory: {}", mem_id);
@@ -737,7 +744,7 @@ async fn run_memory_example(
         .await
         .context("Failed to start memorize duplicate #1")?;
     info!("   → Session started: {}", dup_session1.session_id);
-    let dup1_id = wait_for_memorize_completion(client, &dup_session1.session_id, cancel_token.clone())
+    let dup1_id = wait_for_memorize_completion(client, &dup_session1.session_id, &config, cancel_token.clone())
         .await
         .with_context(|| format!("Failed to complete memorize for session '{}'", dup_session1.session_id))?;
     info!("   ✅ First insertion - Memory ID: {}", dup1_id);
@@ -754,7 +761,7 @@ async fn run_memory_example(
         .await
         .context("Failed to start memorize duplicate #2")?;
     info!("   → Session started: {}", dup_session2.session_id);
-    let dup2_id = wait_for_memorize_completion(client, &dup_session2.session_id, cancel_token.clone())
+    let dup2_id = wait_for_memorize_completion(client, &dup_session2.session_id, &config, cancel_token.clone())
         .await
         .with_context(|| format!("Failed to complete memorize for session '{}'", dup_session2.session_id))?;
     info!("   ✅ Second insertion - Memory ID: {}", dup2_id);
@@ -781,7 +788,7 @@ async fn run_memory_example(
         .await
         .context("Failed to start memorize duplicate #3")?;
     info!("   → Session started: {}", dup_session3.session_id);
-    let dup3_id = wait_for_memorize_completion(client, &dup_session3.session_id, cancel_token.clone())
+    let dup3_id = wait_for_memorize_completion(client, &dup_session3.session_id, &config, cancel_token.clone())
         .await
         .with_context(|| format!("Failed to complete memorize for session '{}'", dup_session3.session_id))?;
     info!("   ✅ Third insertion (different library) - Memory ID: {}", dup3_id);
