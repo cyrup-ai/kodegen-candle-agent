@@ -160,7 +160,7 @@ impl RetrievalStrategy for TemporalRetrieval {
                     .into_iter()
                     .map(|memory| {
                         // Calculate age in hours
-                        let memory_timestamp = memory.created_at.inner().timestamp() as f64;
+                        let memory_timestamp = memory.created_at.into_inner().timestamp() as f64;
                         let age_hours = (now_timestamp - memory_timestamp) / 3600.0;
 
                         // Apply exponential decay based on age
@@ -215,7 +215,7 @@ impl RetrievalStrategy for TemporalRetrieval {
                         );
                         metadata.insert(
                             "created_at".to_string(),
-                            serde_json::Value::String(memory.created_at.inner().to_rfc3339()),
+                            serde_json::Value::String(memory.created_at.into_inner().to_rfc3339()),
                         );
 
                         RetrievalResult {

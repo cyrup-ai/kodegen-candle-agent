@@ -19,7 +19,7 @@ impl MemoryCoordinator {
         let now = Datetime::now();
 
         // Calculate age of memory
-        let age = now.inner().signed_duration_since(*memory.base_memory.created_at);
+        let age = now.into_inner().signed_duration_since(*memory.base_memory.created_at);
 
         // Calculate days old with fractional precision
         let days_old = age.num_seconds() as f64 / 86400.0; // seconds per day
@@ -62,7 +62,7 @@ impl MemoryCoordinator {
         memory: &mut crate::memory::core::primitives::node::MemoryNode,
     ) -> Result<()> {
         let now = Datetime::now();
-        let age = now.inner().signed_duration_since(*memory.created_at);
+        let age = now.into_inner().signed_duration_since(*memory.created_at);
 
         // Calculate days old with fractional precision
         let days_old = age.num_seconds() as f64 / 86400.0;
